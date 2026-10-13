@@ -35,6 +35,7 @@
 - 📊 **Статистика прослушиваний:** история треков, рейтинг любимых композиций и исполнителей, а также сезонные и годовые персональные итоги.
 - 👥 **Умная группировка артистов:** корректное распознавание различий в регистре и авторов совместных релизов («feat.», «ft.», «&»).
 - 🌐 **Двуязычный интерфейс:** полная поддержка русского и английского языков с переключением в настройках.
+- **USB bit-perfect:** воспроизведение через совместимые USB-ЦАПы без пересэмплирования и программной обработки звука. Требует Android 14+ и поддержки устройства и формата; отображает статус и параметры активного вывода (экспериментальная бета: возможны ошибки и проблемы совместимости).
 
 ### 🔒 Конфиденциальность и энергоэффективность
 
@@ -67,6 +68,7 @@
 - 📊 **Listening statistics:** playback history, top tracks and artists, seasonal and yearly recaps.
 - 👥 **Smart artist grouping:** recognizes case variations and collaboration credits such as "feat.", "ft.", and "&".
 - 🌐 **Two languages:** English and Russian, selectable in Settings.
+- **USB bit-perfect:** playback through compatible USB DACs without resampling or software audio processing. Requires Android 14+ and device and format support; displays the status and active output format (experimental beta: bugs and compatibility issues may occur).
 
 ### 🔒 Privacy & Power Efficiency
 
