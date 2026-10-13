@@ -1,3 +1,5 @@
+[English](README.md) | [Русский](READMEru.md)
+
 Riff
 
 Riff is an open-source Android music player with a Material 3 Expressive interface. Enjoy your local music, personalize the player and explore your listening history.
