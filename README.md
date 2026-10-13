@@ -1,6 +1,5 @@
 <div align="center">
 
-<!-- Логотип приложения из репозитория -->
 <img src="app/src/main/res/drawable-nodpi/ic_riff_foreground.png" alt="Riff Logo" width="128" height="128" />
 
 # Riff
