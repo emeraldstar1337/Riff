@@ -81,3 +81,5 @@
 - **Built with:** Kotlin, Jetpack Compose, Material 3 Expressive.
 - **Requirements:** Android 8.0 or later.
 - **License:** [MIT](LICENSE).
+
+Co-authored-by: Codex :)
