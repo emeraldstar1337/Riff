@@ -3,6 +3,9 @@
 package dev.lad.ui
 
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Typography
 import androidx.compose.ui.graphics.Color
@@ -27,15 +30,16 @@ object LadSpacing {
 }
 
 object LadShapes {
+    // Material 3 Expressive 10-step corner scale: 0 / 4 / 8 / 12 / 16 / 20 / 28 / 32 / 48 / full
     val tiny = RoundedCornerShape(8.dp)
     val small = RoundedCornerShape(12.dp)
     val medium = RoundedCornerShape(16.dp)
-    val card = RoundedCornerShape(24.dp)
+    val card = RoundedCornerShape(20.dp)
     val artwork = RoundedCornerShape(28.dp)
     val hero = RoundedCornerShape(32.dp)
     val player = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     val selected = RoundedCornerShape(16.dp)
-    val control = RoundedCornerShape(24.dp)
+    val control = RoundedCornerShape(28.dp)
 }
 
 object LadMotion {
@@ -47,13 +51,34 @@ object LadMotion {
     val easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
     fun duration(value: Int, enabled: Boolean) = if (enabled) value else 0
+
+    // Material 3 Expressive spring tokens (damping / stiffness from M3E tokens)
+    fun <T> fastSpatial(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 0.6f, stiffness = 800f) else snap()
+
+    fun <T> defaultSpatial(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 0.8f, stiffness = 380f) else snap()
+
+    fun <T> slowSpatial(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 0.8f, stiffness = 200f) else snap()
+
+    fun <T> fastEffects(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 1.0f, stiffness = 3800f) else snap()
+
+    fun <T> defaultEffects(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 1.0f, stiffness = 1600f) else snap()
+
+    fun <T> slowEffects(enabled: Boolean = true): FiniteAnimationSpec<T> =
+        if (enabled) spring(dampingRatio = 1.0f, stiffness = 800f) else snap()
 }
 
 object LadColors {
     val night = Color(0xFF0C1013)
+    val surfaceLowest = Color(0xFF080B0D)
     val surfaceLow = Color(0xFF151B20)
     val surface = Color(0xFF1B2329)
-    val surfaceHigh = Color(0xFF27323A)
+    val surfaceHigh = Color(0xFF232C34)
+    val surfaceHighest = Color(0xFF2C3740)
     val ink = Color(0xFFF0F3F6)
     val muted = Color(0xFFB9C3CB)
     val paper = Color(0xFFF8F9FA)

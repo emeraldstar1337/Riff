@@ -24,19 +24,19 @@ internal fun ExpressiveSheet(onClose: () -> Unit, content: @Composable () -> Uni
     val density = androidx.compose.ui.platform.LocalDensity.current
     val animations = LocalLadSettings.current.animations
     val reveal = remember { Animatable(if (animations) 0f else 1f) }
-    var drag by remember { mutableFloatStateOf(0f) }
+    val drag = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun close() {
         if (closing) return
         closing = true
         scope.launch {
-            reveal.animateTo(0f, tween(if (animations) 160 else 0, easing = LadMotion.easing))
+            reveal.animateTo(0f, LadMotion.fastEffects(animations))
             onClose()
         }
     }
     LaunchedEffect(Unit) {
-        reveal.animateTo(1f, tween(if (animations) 260 else 0, easing = LadMotion.easing))
+        reveal.animateTo(1f, LadMotion.defaultSpatial(animations))
     }
     Dialog(
         onDismissRequest = ::close,
@@ -64,15 +64,15 @@ internal fun ExpressiveSheet(onClose: () -> Unit, content: @Composable () -> Uni
                         .fillMaxWidth()
                         .heightIn(max = maxHeight * .94f)
                         .graphicsLayer {
-                            translationY = (1f - reveal.value) * size.height + drag
-                            alpha = reveal.value
+                            translationY = (1f - reveal.value) * size.height + drag.value
+                            alpha = reveal.value.coerceIn(0f, 1f)
                         },
                     shape =
                         RoundedCornerShape(
                             topStart = 32.dp,
                             topEnd = 32.dp,
-                            bottomStart = 24.dp,
-                            bottomEnd = 24.dp,
+                            bottomStart = 20.dp,
+                            bottomEnd = 20.dp,
                         ),
                     color = MaterialTheme.colorScheme.surfaceContainer,
                 ) {
@@ -82,15 +82,24 @@ internal fun ExpressiveSheet(onClose: () -> Unit, content: @Composable () -> Uni
                                 .height(32.dp)
                                 .draggable(
                                     rememberDraggableState { amount ->
-                                        drag = (drag + amount).coerceAtLeast(0f)
+                                        scope.launch {
+                                            drag.snapTo((drag.value + amount).coerceAtLeast(0f))
+                                        }
                                     },
                                     Orientation.Vertical,
                                     onDragStopped = { velocity ->
                                         if (
-                                            drag > with(density) { 80.dp.toPx() } || velocity > 1400
+                                            drag.value > with(density) { 80.dp.toPx() } ||
+                                                velocity > 1400
                                         )
                                             close()
-                                        else drag = 0f
+                                        else
+                                            scope.launch {
+                                                drag.animateTo(
+                                                    0f,
+                                                    LadMotion.defaultSpatial(animations),
+                                                )
+                                            }
                                     },
                                 ),
                             contentAlignment = Alignment.Center,

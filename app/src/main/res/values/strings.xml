@@ -558,5 +558,13 @@
 <string name="cards_transition">Cards</string>
 <string name="morph_transition">Morph</string>
     <string name="artist_photos">Online artist photos</string>
-    <string name="artist_photos_description">Artist photos from Apple Music, cached on your device. Tap the profile photo to open its source.</string>
+    <string name="artist_photos_description">Artist photos from Deezer and Apple Music, cached on your device. Tap the profile photo to open its source.</string>
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_group_player">Player &amp; interface</string>
+    <string name="settings_group_sound_library">Sound &amp; library</string>
+    <string name="settings_group_app">Data &amp; app</string>
+    <string name="settings_lyrics_title">Lyrics</string>
+    <string name="settings_lyrics_detail">Size, spacing, alignment and brightness</string>
+    <string name="settings_player_detail">Layout, seek bar, mini player and widgets</string>
+    <string name="settings_audio_detail">Bit-perfect, equalizer, crossfade and devices</string>
 </resources>

@@ -48,12 +48,12 @@ internal fun PlayerSheet(
         if (!closing) {
             closing = true
             scope.launch {
-                reveal.animateTo(0f, tween(if (animations) 160 else 0))
+                reveal.animateTo(0f, LadMotion.fastEffects(animations))
                 onClose()
             }
         }
     }
-    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(if (animations) 220 else 0)) }
+    LaunchedEffect(Unit) { reveal.animateTo(1f, LadMotion.defaultSpatial(animations)) }
     Dialog(
         onDismissRequest = ::close,
         properties =
@@ -104,7 +104,7 @@ internal fun PlayerSheet(
                                                 velocity > 1400
                                         )
                                             close()
-                                        else offset.animateTo(0f, tween(if (animations) 180 else 0))
+                                        else offset.animateTo(0f, LadMotion.defaultSpatial(animations))
                                     },
                                 ),
                             contentAlignment = Alignment.Center,

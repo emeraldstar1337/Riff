@@ -264,32 +264,29 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                         onClose = { recap = null },
                         animations = settings.animations,
                         settings = settings,
+                        tracks = tracks,
                     )
                 } else
                     NavHost(
                         navController = nav,
                         startDestination = "home",
                         enterTransition = {
-                            fadeIn(
-                                tween(
-                                    LadMotion.duration(LadMotion.expressive, settings.animations),
-                                    easing = BitsEase,
-                                )
-                            ) +
-                                slideInVertically(
-                                    tween(
-                                        LadMotion.duration(
-                                            LadMotion.expressive,
-                                            settings.animations,
-                                        ),
-                                        easing = BitsEase,
-                                    )
-                                ) {
-                                    it / 14
+                            fadeIn(LadMotion.defaultEffects(settings.animations)) +
+                                slideInVertically(LadMotion.defaultSpatial(settings.animations)) {
+                                    it / 16
                                 }
                         },
                         exitTransition = {
-                            fadeOut(tween(LadMotion.duration(LadMotion.quick, settings.animations)))
+                            fadeOut(LadMotion.fastEffects(settings.animations))
+                        },
+                        popEnterTransition = {
+                            fadeIn(LadMotion.defaultEffects(settings.animations))
+                        },
+                        popExitTransition = {
+                            fadeOut(LadMotion.fastEffects(settings.animations)) +
+                                slideOutVertically(LadMotion.fastSpatial(settings.animations)) {
+                                    it / 18
+                                }
                         },
                         modifier = Modifier.padding(padding),
                     ) {

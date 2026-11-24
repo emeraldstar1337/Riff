@@ -44,6 +44,55 @@ object ArtistPhotoMetadata {
         return scores.filterValues { it == best }.keys.singleOrNull()
     }
 
+    fun looseName(value: String): String =
+        name(value)
+            .replace('ё', 'е')
+            .replace(Regex("[^\\p{L}\\p{N}]+"), "")
+
+    data class DeezerArtist(
+        val id: Long,
+        val name: String,
+        val fans: Int,
+        val image: String,
+        val page: String,
+    )
+
+    fun isValidDeezerImage(url: String): Boolean {
+        if (url.isBlank()) return false
+        val uri = runCatching { URI(url) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+        if (uri.scheme != "https" || uri.userInfo != null) return false
+        if (host != "cdn-images.dzcdn.net" && !host.endsWith(".dzcdn.net") && host != "e-cdns-images.dzcdn.net")
+            return false
+        val path = uri.path ?: return false
+        if (!path.startsWith("/images/artist/")) return false
+        // Reject Deezer empty-hash default placeholder silhouettes
+        if (path.contains("/images/artist//")) return false
+        if (path.contains("d41d8cd98f00b204e9800998ecf8427e")) return false
+        return true
+    }
+
+    fun resolveDeezer(
+        query: String,
+        candidates: List<DeezerArtist>,
+        preferredId: Long? = null,
+    ): DeezerArtist? {
+        val valid = candidates.filter { it.id > 0 && isValidDeezerImage(it.image) }
+        if (valid.isEmpty()) return null
+        if (preferredId != null) {
+            valid.firstOrNull { it.id == preferredId }?.let { return it }
+        }
+        val exactKey = name(query)
+        val exact = valid.filter { name(it.name) == exactKey }
+        if (exact.isNotEmpty()) return exact.maxByOrNull { it.fans }
+        val looseKey = looseName(query)
+        if (looseKey.length >= 2) {
+            val loose = valid.filter { looseName(it.name) == looseKey }
+            if (loose.isNotEmpty()) return loose.maxByOrNull { it.fans }
+        }
+        return null
+    }
+
     fun image(page: String): String? {
         for (tag in Regex("<meta\\b[^>]*>", RegexOption.IGNORE_CASE).findAll(page)) {
             val attributes =

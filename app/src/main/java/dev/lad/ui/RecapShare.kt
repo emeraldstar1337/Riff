@@ -13,7 +13,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import coil.imageLoader
 import coil.request.ImageRequest
+import dev.lad.LadApplication
 import dev.lad.R
+import dev.lad.data.Track
 import dev.lad.i18n.rememberText
 import dev.lad.statistics.*
 import dev.lad.util.attempt
@@ -21,9 +23,15 @@ import java.io.File
 import kotlinx.coroutines.*
 
 @Composable
-fun RecapShareButton(stats: MusicStats, slide: RecapSlide, label: String) {
+fun RecapShareButton(
+    stats: MusicStats,
+    slide: RecapSlide,
+    label: String,
+    tracks: List<Track> = emptyList(),
+) {
     val strings = rememberText()
     val context = LocalContext.current
+    val settings = LocalLadSettings.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -46,8 +54,25 @@ fun RecapShareButton(stats: MusicStats, slide: RecapSlide, label: String) {
                                                 R.font.google_sans,
                                             )
                                         c.drawColor(android.graphics.Color.rgb(14, 17, 25))
+                                        val lead = slide.ranking.firstOrNull()
+                                        val artistImage =
+                                            if (lead?.detail == "Artist" && settings.artistPhotos) {
+                                                val repo =
+                                                    (context.applicationContext as? LadApplication)
+                                                        ?.artistPhotos
+                                                val matchingTracks =
+                                                    tracks.filter {
+                                                        it.artist.contains(
+                                                            lead.name,
+                                                            ignoreCase = true,
+                                                        )
+                                                    }
+                                                repo?.peek(lead.name)?.image
+                                                    ?: repo?.find(lead.name, matchingTracks)?.image
+                                            } else null
                                         val cover =
-                                            slide.ranking.firstOrNull()?.artwork
+                                            artistImage
+                                                ?: lead?.artwork
                                                 ?: stats.tracks.firstOrNull()?.artwork
                                         val image =
                                             cover

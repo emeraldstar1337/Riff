@@ -3,6 +3,9 @@
 package dev.lad.ui
 
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -17,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -35,27 +39,30 @@ fun duration(ms: Long): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
+internal fun coverClipShape(coverShape: String, round: Int = 20): Shape =
+    when (coverShape) {
+        "flower" -> FlowerShape
+        "circle" -> CircleShape
+        else -> RoundedCornerShape(round.dp)
+    }
+
 @Composable
-fun Artwork(uri: String?, title: String, modifier: Modifier = Modifier, round: Int = 24) {
+fun Artwork(uri: String?, title: String, modifier: Modifier = Modifier, round: Int = 20) {
     val strings = rememberText()
     var loaded by remember(uri) { mutableStateOf(false) }
-    val decoded = LocalReadyArtwork.current?.takeIf { it.uri == uri }?.drawable as? BitmapDrawable
+    val ready = LocalReadyArtwork.current?.takeIf { it.uri == uri }
+    val readyBitmap = ready?.bitmap
     val style = LocalLadSettings.current
-    val radius =
-        when (style.coverShape) {
-            "circle" -> 1000
-            else -> round
-        }
+    val clipShape =
+        if (LocalReadyArtwork.current != null && style.vinyl) CircleShape
+        else coverClipShape(style.coverShape, round)
     Box(
-        modifier.clip(
-            if (LocalReadyArtwork.current != null && style.vinyl) CircleShape
-            else if (style.coverShape == "flower") FlowerShape else RoundedCornerShape(radius.dp)
-        ),
+        modifier.clip(clipShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (decoded != null)
+        if (readyBitmap != null)
             Image(
-                decoded.bitmap.asImageBitmap(),
+                readyBitmap,
                 strings.format(R.string.artwork, title),
                 Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -144,12 +151,13 @@ fun EmptyState(title: String, body: String, button: String? = null, onClick: () 
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Surface(
-            shape = RoundedCornerShape(40.dp),
+            shape = FlowerShape,
             color = MaterialTheme.colorScheme.secondaryContainer,
-            modifier = Modifier.size(100.dp),
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.size(104.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.LibraryMusic, null, Modifier.size(48.dp))
+                Icon(Icons.Default.LibraryMusic, null, Modifier.size(44.dp))
             }
         }
         Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -183,97 +191,121 @@ fun TrackRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val strings = rememberText()
+    val animations = LocalLadSettings.current.animations
     var menu by remember { mutableStateOf(false) }
     val details = LocalTrackDetails.current
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clip(LadShapes.card)
-            .background(
-                if (active) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceContainerLow
-            )
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    val corner by
+        animateDpAsState(
+            if (active) 28.dp else 20.dp,
+            if (animations) MaterialTheme.motionScheme.fastSpatialSpec() else snap(),
+            label = "track corner",
+        )
+    val container by
+        animateColorAsState(
+            if (active) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+            if (animations) MaterialTheme.motionScheme.fastEffectsSpec() else snap(),
+            label = "track container",
+        )
+    val contentColor =
+        if (active) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    val subColor =
+        if (active) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+        else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(corner),
+        color = container,
+        contentColor = contentColor,
+        onClick = onClick,
     ) {
-        Artwork(track.artwork, track.title, Modifier.size(52.dp), 18)
-        Column(Modifier.weight(1f)) {
-            Text(
-                track.title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Concentric nested radius: 20dp outer - 10dp padding = 10dp -> M3 step 12dp
+            Artwork(track.artwork, track.title, Modifier.size(52.dp), 12)
+            Column(Modifier.weight(1f)) {
                 Text(
-                    strings.metadata(track.artist),
-                    Modifier.weight(1f),
+                    track.title,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                    style = MaterialTheme.typography.titleMedium,
                 )
-                Text(
-                    duration(track.durationMs),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (track.favorite)
-            Icon(
-                Icons.Default.Favorite,
-                null,
-                Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        if (trailing != null) trailing()
-        else
-            Box {
-                IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.MoreVert, strings[R.string.track_actions])
-                }
-                if (menu)
-                    ExpressiveActions(
-                        track.title,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
                         strings.metadata(track.artist),
-                        { menu = false },
-                        listOf(
-                            PlayerAction(
-                                strings[R.string.track_information_and_tags],
-                                strings[R.string.file_artwork_and_statistics],
-                                Icons.Default.Info,
-                            ) {
-                                menu = false
-                                details(track)
-                            },
-                            PlayerAction(
-                                if (track.favorite) strings[R.string.remove_from_favourites]
-                                else strings[R.string.add_to_favourites],
-                                "",
-                                if (track.favorite) Icons.Default.FavoriteBorder
-                                else Icons.Default.Favorite,
-                            ) {
-                                menu = false
-                                onFavorite()
-                            },
-                            PlayerAction(
-                                strings[R.string.add_to_playlist],
-                                "",
-                                Icons.AutoMirrored.Filled.PlaylistAdd,
-                            ) {
-                                menu = false
-                                onAdd()
-                            },
-                        ),
+                        Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = subColor,
                     )
+                    Text(
+                        duration(track.durationMs),
+                        style =
+                            MaterialTheme.typography.labelSmall.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
+                        color = subColor,
+                    )
+                }
             }
+            if (track.favorite)
+                Icon(
+                    Icons.Default.Favorite,
+                    null,
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            if (trailing != null) trailing()
+            else
+                Box {
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.MoreVert, strings[R.string.track_actions])
+                    }
+                    if (menu)
+                        ExpressiveActions(
+                            track.title,
+                            strings.metadata(track.artist),
+                            { menu = false },
+                            listOf(
+                                PlayerAction(
+                                    strings[R.string.track_information_and_tags],
+                                    strings[R.string.file_artwork_and_statistics],
+                                    Icons.Default.Info,
+                                ) {
+                                    menu = false
+                                    details(track)
+                                },
+                                PlayerAction(
+                                    if (track.favorite) strings[R.string.remove_from_favourites]
+                                    else strings[R.string.add_to_favourites],
+                                    "",
+                                    if (track.favorite) Icons.Default.FavoriteBorder
+                                    else Icons.Default.Favorite,
+                                ) {
+                                    menu = false
+                                    onFavorite()
+                                },
+                                PlayerAction(
+                                    strings[R.string.add_to_playlist],
+                                    "",
+                                    Icons.AutoMirrored.Filled.PlaylistAdd,
+                                ) {
+                                    menu = false
+                                    onAdd()
+                                },
+                            ),
+                        )
+                }
+        }
     }
 }
 

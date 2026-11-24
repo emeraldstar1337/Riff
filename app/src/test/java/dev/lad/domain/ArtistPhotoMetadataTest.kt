@@ -87,4 +87,39 @@ class ArtistPhotoMetadataTest {
         }
         assertNull(ArtistPhotoMetadata.image("<meta property='og:title' content='Artist'>"))
     }
+
+    @Test
+    fun resolvesDeezerArtistAndRejectsDefaultPlaceholders() {
+        val validUrl =
+            "https://cdn-images.dzcdn.net/images/artist/3212498cc7cd91f282d934043746a64d/500x500-000000-80-0-0.jpg"
+        val placeholderUrl =
+            "https://cdn-images.dzcdn.net/images/artist//500x500-000000-80-0-0.jpg"
+        val emptyMd5Url =
+            "https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/500x500-000000-80-0-0.jpg"
+        assertTrue(ArtistPhotoMetadata.isValidDeezerImage(validUrl))
+        assertFalse(ArtistPhotoMetadata.isValidDeezerImage(placeholderUrl))
+        assertFalse(ArtistPhotoMetadata.isValidDeezerImage(emptyMd5Url))
+        assertFalse(ArtistPhotoMetadata.isValidDeezerImage("http://cdn-images.dzcdn.net/images/artist/abc/500x500.jpg"))
+
+        val resolved =
+            ArtistPhotoMetadata.resolveDeezer(
+                "PHARAOH",
+                listOf(
+                    ArtistPhotoMetadata.DeezerArtist(1L, "Pharaoh", 100, placeholderUrl, ""),
+                    ArtistPhotoMetadata.DeezerArtist(2L, "Pharaoh", 89000, validUrl, "https://www.deezer.com/artist/2"),
+                    ArtistPhotoMetadata.DeezerArtist(3L, "Other", 500000, validUrl, ""),
+                ),
+            )
+        assertEquals(2L, resolved?.id)
+        assertEquals(validUrl, resolved?.image)
+
+        val loose =
+            ArtistPhotoMetadata.resolveDeezer(
+                "Ёлка",
+                listOf(
+                    ArtistPhotoMetadata.DeezerArtist(4L, "Елка", 12000, validUrl, ""),
+                ),
+            )
+        assertEquals(4L, loose?.id)
+    }
 }

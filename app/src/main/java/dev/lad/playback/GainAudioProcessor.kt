@@ -12,6 +12,7 @@ import kotlin.math.*
 @androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
 class GainAudioProcessor : BaseAudioProcessor() {
     @Volatile var gain = 1f
+    @Volatile var bypassed = false
     val dsp = AudioDsp()
     var onLevels: ((List<Float>) -> Unit)? = null
     @Volatile var meterEnabled = false
@@ -44,6 +45,11 @@ class GainAudioProcessor : BaseAudioProcessor() {
         if (!input.hasRemaining()) return
         val output = replaceOutputBuffer(input.remaining()).order(ByteOrder.nativeOrder())
         input.order(ByteOrder.nativeOrder())
+        if (bypassed) {
+            output.put(input)
+            output.flip()
+            return
+        }
         val floating = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
         val step = if (floating) 4 else 2
         val channels = inputAudioFormat.channelCount.coerceAtLeast(1)

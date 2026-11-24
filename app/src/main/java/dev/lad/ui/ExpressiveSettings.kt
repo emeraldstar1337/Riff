@@ -8,6 +8,8 @@ package dev.lad.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
@@ -21,7 +23,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -82,17 +86,27 @@ fun SettingSwitch(
 }
 
 @Composable
-fun ChoiceChips(current: String, values: List<Pair<String, String>>, onSelect: (String) -> Unit) {
-    val connected = values.size in 2..3 && values.sumOf { it.second.length } <= 24
+fun ChoiceChips(
+    current: String,
+    values: List<Pair<String, String>>,
+    swatches: Map<String, Color> = emptyMap(),
+    onSelect: (String) -> Unit,
+) {
+    // M3 Expressive: connected button groups stay in a single horizontal row (never wrap to 2 rows)
+    val fillWidth =
+        values.size in 2..3 &&
+            swatches.isEmpty() &&
+            values.sumOf { it.second.length } <= 28
     @Composable
     fun Choice(index: Int, modifier: Modifier = Modifier) {
         val (value, name) = values[index]
         val checked = current == value
+        val swatch = swatches[value]
         ToggleButton(
             checked = checked,
             contentPadding =
-                if (connected) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
-                else ButtonDefaults.ContentPadding,
+                if (fillWidth) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                else PaddingValues(horizontal = 14.dp, vertical = 12.dp),
             onCheckedChange = { onSelect(value) },
             modifier =
                 modifier.heightIn(min = 48.dp).semantics {
@@ -100,32 +114,47 @@ fun ChoiceChips(current: String, values: List<Pair<String, String>>, onSelect: (
                     selected = checked
                 },
             shapes =
-                if (!connected) ToggleButtonDefaults.shapes()
-                else
-                    when (index) {
-                        0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                    },
+                when {
+                    values.size == 1 -> ToggleButtonDefaults.shapes()
+                    index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    index == values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
         ) {
-            Text(name)
+            if (swatch != null) {
+                Box(
+                    Modifier.size(12.dp)
+                        .clip(CircleShape)
+                        .background(swatch)
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                name,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
-    if (connected)
+    if (fillWidth) {
         Row(
             Modifier.fillMaxWidth().selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             values.indices.forEach { Choice(it, Modifier.weight(1f)) }
         }
-    else
-        FlowRow(
-            Modifier.fillMaxWidth().selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    } else {
+        val scrollState = rememberScrollState()
+        Row(
+            Modifier.fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             values.indices.forEach { Choice(it) }
         }
+    }
 }
 
 @Composable
@@ -188,7 +217,7 @@ internal fun SettingsAction(
     detail: String,
     icon: ImageVector,
     onClick: () -> Unit,
-) = StyleChoice(title, detail, false, icon, onClick)
+) = StyleChoice(title, detail, false, icon, onClick = onClick)
 
 internal data class PlayerAction(
     val title: String,
@@ -223,7 +252,7 @@ internal fun ExpressiveActions(
                 )
             Spacer(Modifier.height(8.dp))
             actions.forEach { action ->
-                StyleChoice(action.title, action.detail, false, action.icon, action.run)
+                StyleChoice(action.title, action.detail, false, action.icon, onClick = action.run)
             }
             Spacer(Modifier.height(20.dp))
         }
@@ -236,6 +265,7 @@ internal fun StyleChoice(
     description: String,
     selected: Boolean,
     icon: ImageVector,
+    shape: Shape? = null,
     onClick: () -> Unit,
 ) {
     val strings = rememberText()
@@ -248,18 +278,26 @@ internal fun StyleChoice(
         )
     val iconCorner by
         animateDpAsState(
-            if (selected) 16.dp else 24.dp,
+            if (selected) 16.dp else 20.dp,
             if (animations) MaterialTheme.motionScheme.fastSpatialSpec() else snap(),
             label = "choice icon corner",
         )
     val container by
         animateColorAsState(
             if (selected) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
+            else MaterialTheme.colorScheme.surfaceContainerLow,
             if (animations) MaterialTheme.motionScheme.fastEffectsSpec() else snap(),
             label = "choice container",
         )
-    Surface(onClick = onClick, shape = RoundedCornerShape(corner), color = container) {
+    val contentColor =
+        if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onSurface
+    Surface(
+        onClick = onClick,
+        shape = shape ?: RoundedCornerShape(corner),
+        color = container,
+        contentColor = contentColor,
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -289,16 +327,42 @@ internal fun StyleChoice(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
             }
-            Box(Modifier.size(24.dp)) {
+            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
                 if (selected)
                     Icon(
                         Icons.Default.CheckCircle,
                         strings[R.string.selection_label],
                         tint = MaterialTheme.colorScheme.primary,
                     )
+                else if (shape != null)
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             }
         }
     }
+}
+
+internal fun segmentedItemShape(index: Int, count: Int): Shape =
+    when {
+        count <= 1 -> RoundedCornerShape(28.dp)
+        index == 0 ->
+            RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
+        index == count - 1 ->
+            RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 28.dp, bottomEnd = 28.dp)
+        else -> RoundedCornerShape(8.dp)
+    }
+
+@Composable
+internal fun SettingsGroupLabel(title: String) {
+    Text(
+        title,
+        Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+    )
 }
 
 @Composable
@@ -456,7 +520,12 @@ internal fun LyricsStylePreview(settings: Settings) {
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(((settings.lyricsSpacing - 1f) * 48f).dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        ((settings.lyricsSpacing.coerceIn(1.1f, 1.7f) - 1f) * 28f)
+                            .coerceAtLeast(4f)
+                            .dp
+                    ),
             ) {
                 Text(
                     strings[R.string.lyrics_preview],

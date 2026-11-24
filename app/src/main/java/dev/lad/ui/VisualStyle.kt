@@ -1,12 +1,13 @@
 package dev.lad.ui
 
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
@@ -25,7 +26,7 @@ import dev.lad.domain.CoverPalette
 import dev.lad.util.attempt
 import kotlin.math.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
@@ -171,84 +172,82 @@ fun AmbientBackdrop(
     val scheme = MaterialTheme.colorScheme
     val settings = LocalLadSettings.current
     val owner = LocalLifecycleOwner.current
-
-    val motion =
-        produceState(
-            0f,
-            enabled,
-            settings.glowMotion,
-            settings.animations,
-            settings.glowShapes,
-            settings.motionSpeed,
-            animations,
-            owner,
+    // Animate backdrop colors in the draw phase so FullPlayer never recomposes on every frame
+    val animatedSurface =
+        animateColorAsState(
+            scheme.surface,
+            if (settings.animations) tween(450, easing = FastOutSlowInEasing) else snap(),
+            label = "backdrop surface",
+        )
+    val animatedSeed =
+        animateColorAsState(
+            seed,
+            if (settings.animations) tween(450, easing = FastOutSlowInEasing) else snap(),
+            label = "backdrop seed",
+        )
+    // Sync ambient drift to native display VSync (60/90/120Hz) instead of 12fps delay(83)
+    val motion = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(
+        enabled,
+        settings.glowMotion,
+        settings.animations,
+        settings.glowShapes,
+        settings.motionSpeed,
+        animations,
+        owner,
+    ) {
+        if (
+            enabled &&
+                (settings.glowMotion || settings.glowShapes) &&
+                settings.animations &&
+                animations
         ) {
-            if (
-                enabled &&
-                    (settings.glowMotion || settings.glowShapes) &&
-                    settings.animations &&
-                    animations
-            ) {
-                owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                    while (isActive) {
-                        value =
-                            ((value +
-                                    0.083f * settings.motionSpeed.coerceIn(0.3f, 1.5f) * PI / 18) %
-                                    (2 * PI))
-                                .toFloat()
-                        delay(83)
+            owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                var previous = 0L
+                val speed = settings.motionSpeed.coerceIn(0.3f, 1.5f)
+                while (
+                    isActive &&
+                        (currentCoroutineContext()[MotionDurationScale]?.scaleFactor ?: 1f) > 0f
+                ) {
+                    withFrameNanos { now ->
+                        if (previous != 0L) {
+                            val dt = ((now - previous) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                            motion.floatValue =
+                                ((motion.floatValue + dt * speed * PI.toFloat() / 18f) %
+                                    (2f * PI.toFloat()))
+                        }
+                        previous = now
                     }
                 }
             }
         }
-    Box(modifier.background(scheme.surface)) {
-        if (enabled) {
-            val dark = scheme.surface.luminance() < 0.4f
-            val saturation = settings.glowSaturation.coerceIn(0f, 1f)
-            val gray = Color(seed.luminance(), seed.luminance(), seed.luminance(), 1f)
-            val tint = lerp(gray, seed, saturation)
-            val shapeTint = ambientShapeColor(tint, dark)
-            val strength = settings.glowStrength.coerceIn(0f, 1.8f)
-            val radius = settings.glowRadius.coerceIn(0.5f, 1.6f)
-            Box(
-                Modifier.matchParentSize().drawWithCache {
-                    val glow = ((if (dark) 0.70f else 0.30f) * strength).coerceAtMost(0.95f)
-                    val main =
-                        Brush.radialGradient(
-                            listOf(
-                                tint.copy(alpha = glow),
-                                tint.copy(alpha = glow * 0.45f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * 0.5f, size.height * 0.36f),
-                            radius = size.width * 0.82f * radius,
-                        )
-                    val secondary =
-                        Brush.radialGradient(
-                            listOf(tint.copy(alpha = glow * 0.48f), Color.Transparent),
-                            center = Offset(size.width * 0.15f, size.height * 0.2f),
-                            radius = size.width * 0.9f * radius,
-                        )
-                    fun flower(lobes: Int, radius: Float): Path =
-                        Path().apply {
-                            for (step in 0..180) {
-                                val angle = step / 180f * 2f * PI.toFloat()
-                                val r = radius * (0.88f + 0.12f * cos(lobes * angle))
-                                val x = cos(angle) * r
-                                val y = sin(angle) * r
-                                if (step == 0) moveTo(x, y) else lineTo(x, y)
-                            }
-                            close()
+    }
+    val saturation = settings.glowSaturation.coerceIn(0f, 1f)
+    val strength = settings.glowStrength.coerceIn(0f, 1.8f)
+    val radius = settings.glowRadius.coerceIn(0.5f, 1.6f)
+    Box(modifier) {
+        Box(
+            Modifier.matchParentSize().drawWithCache {
+                fun flower(lobes: Int, r0: Float): Path =
+                    Path().apply {
+                        for (step in 0..96) {
+                            val angle = step / 96f * 2f * PI.toFloat()
+                            val r = r0 * (0.88f + 0.12f * cos(lobes * angle))
+                            val x = cos(angle) * r
+                            val y = sin(angle) * r
+                            if (step == 0) moveTo(x, y) else lineTo(x, y)
                         }
-                    val centers =
-                        listOf(
-                            Offset(size.width * 0.15f, size.height * 0.18f),
-                            Offset(size.width * 0.90f, size.height * 0.43f),
-                            Offset(size.width * 0.16f, size.height * 0.61f),
-                        )
-                    val count = 3
-                    val shapes =
-                        (0 until count).map { i ->
+                        close()
+                    }
+                val centers =
+                    listOf(
+                        Offset(size.width * 0.15f, size.height * 0.18f),
+                        Offset(size.width * 0.90f, size.height * 0.43f),
+                        Offset(size.width * 0.16f, size.height * 0.61f),
+                    )
+                val shapes =
+                    if (enabled && settings.glowShapes)
+                        (0 until 3).map { i ->
                             when (settings.shapeType) {
                                 "circle" -> flower(0, size.width * .20f * settings.shapeScale)
                                 "flower" -> flower(8, size.width * .23f * settings.shapeScale)
@@ -262,45 +261,64 @@ fun AmbientBackdrop(
                                     )
                             }
                         }
-                    val positions = centers
-                    onDrawBehind {
-                        val phase = motion.value
-                        drawRect(
-                            main,
-                            alpha = if (settings.glowMotion) 0.94f + sin(phase) * 0.06f else 1f,
+                    else emptyList()
+                val mainCenter = Offset(size.width * 0.5f, size.height * 0.36f)
+                val mainRadius = (size.width * 0.82f * radius).coerceAtLeast(1f)
+                val secCenter = Offset(size.width * 0.15f, size.height * 0.2f)
+                val secRadius = (size.width * 0.9f * radius).coerceAtLeast(1f)
+                onDrawBehind {
+                    val surface = animatedSurface.value
+                    drawRect(surface)
+                    if (!enabled) return@onDrawBehind
+                    val currentSeed = animatedSeed.value
+                    val dark = surface.luminance() < 0.4f
+                    val lum = currentSeed.luminance()
+                    val tint = lerp(Color(lum, lum, lum, 1f), currentSeed, saturation)
+                    val glow = ((if (dark) 0.70f else 0.30f) * strength).coerceAtMost(0.95f)
+                    val phase = motion.floatValue
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(
+                                tint.copy(alpha = glow),
+                                tint.copy(alpha = glow * 0.45f),
+                                Color.Transparent,
+                            ),
+                            center = mainCenter,
+                            radius = mainRadius,
+                        ),
+                        alpha = if (settings.glowMotion) 0.94f + sin(phase) * 0.06f else 1f,
+                    )
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(tint.copy(alpha = glow * 0.48f), Color.Transparent),
+                            center = secCenter,
+                            radius = secRadius,
                         )
-                        drawRect(secondary)
-                        if (settings.glowShapes)
-                            shapes.forEachIndexed { i, path ->
-                                val center = positions[i]
-                                withTransform({
-                                    translate(
-                                        center.x + sin(phase + i * 2f) * size.width * 0.05f,
-                                        center.y + cos(phase + i * 1.7f) * size.height * 0.025f,
-                                    )
-                                    rotate(sin(phase + i) * 14f, Offset.Zero)
-                                }) {
-                                    drawPath(
-                                        path,
-                                        shapeTint.copy(
-                                            alpha =
-                                                (settings.shapeOpacity *
-                                                        if (dark)
-                                                            1f +
-                                                                .7f *
-                                                                    ((.35f - tint.luminance()) /
-                                                                            .2f)
-                                                                        .coerceIn(0f, 1f)
-                                                        else 1f)
-                                                    .coerceIn(0.02f, 0.32f)
-                                        ),
-                                    )
-                                }
+                    )
+                    if (shapes.isNotEmpty()) {
+                        val shapeTint = ambientShapeColor(tint, dark)
+                        val shapeAlpha =
+                            (settings.shapeOpacity *
+                                    if (dark)
+                                        1f + .7f * ((.35f - tint.luminance()) / .2f).coerceIn(0f, 1f)
+                                    else 1f)
+                                .coerceIn(0.02f, 0.32f)
+                        shapes.forEachIndexed { i, path ->
+                            val center = centers[i]
+                            withTransform({
+                                translate(
+                                    center.x + sin(phase + i * 2f) * size.width * 0.05f,
+                                    center.y + cos(phase + i * 1.7f) * size.height * 0.025f,
+                                )
+                                rotate(sin(phase + i) * 14f, Offset.Zero)
+                            }) {
+                                drawPath(path, shapeTint.copy(alpha = shapeAlpha))
                             }
+                        }
                     }
                 }
-            )
-        }
+            }
+        )
         content()
     }
 }

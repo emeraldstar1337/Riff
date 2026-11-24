@@ -200,6 +200,8 @@ object RecapGenerator {
                     t?.id,
                 )
             }
+        val credits =
+            if (tracks.isNotEmpty()) ArtistCredits(tracks.map { it.artist }, true) else null
         return MusicStats(
             8642 * 60_000L,
             2184,
@@ -208,8 +210,12 @@ object RecapGenerator {
             ranks,
             ranks
                 .mapIndexed { i, r ->
+                    val rawArtist = tracks.getOrNull(i)?.artist
+                    val artistName =
+                        rawArtist?.let { credits?.artists(it)?.firstOrNull()?.name ?: it }
+                            ?: artists[i]
                     r.copy(
-                        name = tracks.getOrNull(i)?.artist ?: artists[i],
+                        name = artistName,
                         detail = "Artist",
                         listenedMs = r.listenedMs * 3,
                     )

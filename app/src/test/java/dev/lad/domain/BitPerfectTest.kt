@@ -200,4 +200,20 @@ class BitPerfectTest {
         assertEquals(8388607, next24())
         assertEquals(0, next24())
     }
+
+    @Test
+    fun stateCarriesOptionalDeviceNameWithoutBreakingDefaults() {
+        val off = BitPerfectState()
+        assertEquals(BitPerfectStatus.OFF, off.status)
+        assertNull(off.format)
+        assertNull(off.deviceName)
+        val active =
+            BitPerfectState(
+                BitPerfectStatus.ACTIVE,
+                format(PcmEncoding.PCM24, 96000),
+                "USB-C HiFi DAC",
+            )
+        assertEquals("USB-C HiFi DAC", active.deviceName)
+        assertEquals(96000, active.format?.sampleRate)
+    }
 }

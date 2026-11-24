@@ -45,6 +45,7 @@ class BitPerfectAudioSink(
     private var discontinuity = false
     private var playing = false
     private var draining = false
+    private var trackStopped = false
     private var advancing = false
     private var directMode = false
     private var bufferSize = 0
@@ -109,8 +110,10 @@ class BitPerfectAudioSink(
     private fun initialize(): Boolean {
         val config = configuration ?: return false
         val plan = config.plan ?: return false
-        val channelMask = Util.getAudioTrackChannelConfig(plan.output.channels)
         val format = usb.prepare(plan.output) ?: return fallBack(config)
+        val channelMask =
+            format.channelMask.takeIf { it != 0 && it != android.media.AudioFormat.CHANNEL_INVALID }
+                ?: Util.getAudioTrackChannelConfig(plan.output.channels)
         val minimum = AudioTrack.getMinBufferSize(format.sampleRate, channelMask, format.encoding)
         if (minimum <= 0) return fallBack(config)
         bufferSize =
@@ -130,10 +133,11 @@ class BitPerfectAudioSink(
                 }
                 .getOrNull() ?: return fallBack(config)
         if (value.state != AudioTrack.STATE_INITIALIZED || !usb.attach(value, plan.output)) {
-            value.release()
+            runCatching { value.release() }
             return fallBack(config)
         }
         direct = value
+        trackStopped = false
         trimmer =
             PcmTrimmer(
                 plan.output.channels * plan.output.encoding.bytes,
@@ -209,6 +213,10 @@ class BitPerfectAudioSink(
         if (data.hasRemaining()) return false
         queued = null
         output = null
+        if (draining && !trackStopped) {
+            trackStopped = true
+            runCatching { track.stop() }
+        }
         return true
     }
 
@@ -253,12 +261,21 @@ class BitPerfectAudioSink(
     override fun isEnded() = if (directMode) draining && !hasPendingData() else super.isEnded()
 
     override fun playToEndOfStream() {
-        if (directMode) draining = true else super.playToEndOfStream()
+        if (directMode) {
+            draining = true
+            if (output?.hasRemaining() != true && !trackStopped) {
+                trackStopped = true
+                runCatching { direct?.stop() }
+            }
+        } else super.playToEndOfStream()
     }
 
     override fun play() {
         playing = true
-        if (directMode) direct?.play() else super.play()
+        if (directMode) {
+            trackStopped = false
+            direct?.play()
+        } else super.play()
     }
 
     override fun pause() {
@@ -337,12 +354,13 @@ class BitPerfectAudioSink(
         mediaBaseUs = AudioSink.CURRENT_POSITION_NOT_SET
         discontinuity = false
         advancing = false
+        trackStopped = false
         if (value != null) {
             onTrackReleased(value)
-            usb.detach(value)
             runCatching { value.pause() }
             runCatching { value.flush() }
             runCatching { value.release() }
+            usb.detach(value)
         }
     }
 }

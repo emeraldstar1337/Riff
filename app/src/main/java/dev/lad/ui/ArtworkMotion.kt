@@ -1,21 +1,33 @@
 package dev.lad.ui
 
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.imageLoader
 import coil.request.ImageRequest
 
-internal data class ReadyArtwork(val uri: String?, val drawable: Drawable?, val sequence: Int = 0)
+internal data class ReadyArtwork(
+    val uri: String?,
+    val drawable: Drawable?,
+    val bitmap: ImageBitmap? = (drawable as? BitmapDrawable)?.bitmap?.asImageBitmap(),
+    val sequence: Int = 0,
+)
 
 internal val LocalReadyArtwork = staticCompositionLocalOf<ReadyArtwork?> { null }
 
@@ -30,7 +42,7 @@ internal fun ArtworkMotion(
     val settings = LocalLadSettings.current
     val context = LocalContext.current
     val width = LocalConfiguration.current.screenWidthDp.dp
-    val edge = with(LocalDensity.current) { width.roundToPx() }.coerceIn(256, 2048)
+    val edge = with(LocalDensity.current) { width.roundToPx() }.coerceIn(256, 1024)
     var ready by remember { mutableStateOf<ReadyArtwork?>(null) }
     LaunchedEffect(uri, imageLoader, edge) {
         val result =
@@ -45,7 +57,8 @@ internal fun ArtworkMotion(
                             .build()
                     )
                     .drawable
-        ready = ReadyArtwork(uri, result, (ready?.sequence ?: 0) + 1)
+        val imageBitmap = (result as? BitmapDrawable)?.bitmap?.asImageBitmap()
+        ready = ReadyArtwork(uri, result, imageBitmap, (ready?.sequence ?: 0) + 1)
     }
     val image = ready
     if (image == null) {
@@ -57,64 +70,47 @@ internal fun ArtworkMotion(
         contentKey = { it.uri },
         modifier = modifier,
         transitionSpec = {
-            val duration = if (settings.animations) 640 else 0
-            val motion =
-                tween<androidx.compose.ui.unit.IntOffset>(duration, easing = LadMotion.easing)
+            val animated = settings.animations
+            val slideSpec =
+                if (animated) spring<IntOffset>(dampingRatio = 0.90f, stiffness = 340f) else snap()
+            val scaleSpec =
+                if (animated) spring<Float>(dampingRatio = 0.90f, stiffness = 340f) else snap()
+            val fadeSpec =
+                if (animated) tween<Float>(300, easing = FastOutSlowInEasing) else snap()
             val sign = if (direction < 0) -1 else 1
             when (settings.coverTransition) {
                     "cards" ->
-                        (slideInHorizontally(motion) { it * sign } +
-                                scaleIn(
-                                    tween(duration, easing = LadMotion.easing),
-                                    initialScale = .88f,
-                                ))
+                        (slideInHorizontally(slideSpec) { it * sign } +
+                                scaleIn(scaleSpec, initialScale = .90f))
                             .togetherWith(
-                                slideOutHorizontally(motion) { -it * sign } +
-                                    scaleOut(
-                                        tween(duration, easing = LadMotion.easing),
-                                        targetScale = .88f,
-                                    )
+                                slideOutHorizontally(slideSpec) { -it * sign } +
+                                    scaleOut(scaleSpec, targetScale = .90f)
                             )
                     "zoom" ->
-                        (fadeIn(tween(duration, easing = LadMotion.easing)) +
-                                scaleIn(
-                                    tween(duration, easing = LadMotion.easing),
-                                    initialScale = .94f,
-                                ))
+                        (fadeIn(fadeSpec) + scaleIn(scaleSpec, initialScale = .92f))
                             .togetherWith(
-                                fadeOut(tween(duration, easing = LadMotion.easing)) +
-                                    scaleOut(
-                                        tween(duration, easing = LadMotion.easing),
-                                        targetScale = 1.06f,
-                                    )
+                                fadeOut(fadeSpec) + scaleOut(scaleSpec, targetScale = 1.06f)
                             )
                     "morph" ->
-                        (fadeIn(tween(duration, easing = LadMotion.easing)) +
-                                scaleIn(
-                                    tween(duration, easing = LadMotion.easing),
-                                    initialScale = .82f,
-                                ) +
-                                slideInHorizontally(motion) { it * sign / 5 })
+                        (fadeIn(fadeSpec) +
+                                scaleIn(scaleSpec, initialScale = .84f) +
+                                slideInHorizontally(slideSpec) { it * sign / 5 })
                             .togetherWith(
-                                fadeOut(tween(duration, easing = LadMotion.easing)) +
-                                    scaleOut(
-                                        tween(duration, easing = LadMotion.easing),
-                                        targetScale = .82f,
-                                    ) +
-                                    slideOutHorizontally(motion) { -it * sign / 5 }
+                                fadeOut(fadeSpec) +
+                                    scaleOut(scaleSpec, targetScale = .84f) +
+                                    slideOutHorizontally(slideSpec) { -it * sign / 5 }
                             )
                     else ->
-                        (fadeIn(tween(duration, easing = LadMotion.easing)) +
-                                slideInHorizontally(motion) { it * sign / 10 })
+                        (fadeIn(fadeSpec) + slideInHorizontally(slideSpec) { it * sign / 12 })
                             .togetherWith(ExitTransition.None)
                 }
                 .apply { targetContentZIndex = targetState.sequence.toFloat() }
                 .using(SizeTransform(clip = false))
         },
         label = "artwork transition",
-    ) { image ->
-        CompositionLocalProvider(LocalReadyArtwork provides image) {
-            Box(Modifier.fillMaxSize()) { content(image.uri) }
+    ) { current ->
+        CompositionLocalProvider(LocalReadyArtwork provides current) {
+            Box(Modifier.fillMaxSize()) { content(current.uri) }
         }
     }
 }

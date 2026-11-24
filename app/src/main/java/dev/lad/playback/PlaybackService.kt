@@ -979,6 +979,8 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyAudioPolicy() {
         if (!::active.isInitialized) return
+        active.gain.bypassed = settings.bitPerfect
+        spare?.gain?.bypassed = settings.bitPerfect
         active.gain.dsp.profile =
             if (settings.bitPerfect) SoundProfile()
             else liveProfiles[deviceKey] ?: SoundProfiles.read(settings.audioProfiles, deviceKey)

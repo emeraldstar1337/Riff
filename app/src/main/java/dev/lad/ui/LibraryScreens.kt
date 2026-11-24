@@ -117,7 +117,7 @@ fun HomeScreen(
                             featured.artwork,
                             featured.album,
                             Modifier.fillMaxWidth().aspectRatio(1.16f),
-                            24,
+                            20,
                         )
                         Row(
                             Modifier.fillMaxWidth()
@@ -467,8 +467,8 @@ fun LibraryScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            if (tab == 1) Artwork(first.artwork, name, Modifier.size(76.dp), 18)
-                            else ArtistPortrait(name, list, Modifier.size(76.dp))
+                            if (tab == 1) Artwork(first.artwork, name, Modifier.size(76.dp), 12)
+                            else ArtistPortrait(name, list, Modifier.size(76.dp), round = 12)
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     name,
@@ -574,7 +574,13 @@ fun TrackListScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (onAlbum != null)
-                        ArtistPortrait(name, albumTracks, Modifier.size(128.dp), openSource = true)
+                        ArtistPortrait(
+                            name,
+                            albumTracks,
+                            Modifier.size(128.dp),
+                            openSource = true,
+                            round = 28,
+                        )
                     else
                         Artwork(
                             first.artwork,
@@ -769,7 +775,9 @@ fun SearchScreen(
                     ListItem(
                         headlineContent = { Text(a) },
                         supportingContent = { Text(strings[R.string.artist]) },
-                        leadingContent = { ArtistPortrait(a, group.items, Modifier.size(48.dp)) },
+                        leadingContent = {
+                            ArtistPortrait(a, group.items, Modifier.size(48.dp), round = 12)
+                        },
                         modifier = Modifier.clickable { onArtist(a, group.items) },
                     )
                 }

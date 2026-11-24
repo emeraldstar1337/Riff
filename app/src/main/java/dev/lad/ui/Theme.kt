@@ -18,19 +18,22 @@ fun LadTheme(settings: Settings, content: @Composable () -> Unit) {
             else -> isSystemInDarkTheme()
         }
     val accent = AccentColors[settings.accent] ?: AccentColors.getValue("violet")
+    val dynamic = settings.dynamicColor && Build.VERSION.SDK_INT >= 31
     val base =
-        if (settings.dynamicColor && Build.VERSION.SDK_INT >= 31) {
+        if (dynamic) {
             if (dark) dynamicDarkColorScheme(androidx.compose.ui.platform.LocalContext.current)
             else dynamicLightColorScheme(androidx.compose.ui.platform.LocalContext.current)
         } else coverScheme(accent, if (dark) darkColorScheme() else lightColorScheme())
     val styled =
-        if (dark)
+        if (dark && !dynamic)
             base.copy(
                 surface = LadColors.night,
                 background = LadColors.night,
+                surfaceContainerLowest = LadColors.surfaceLowest,
                 surfaceContainerLow = LadColors.surfaceLow,
                 surfaceContainer = LadColors.surface,
                 surfaceContainerHigh = LadColors.surfaceHigh,
+                surfaceContainerHighest = LadColors.surfaceHighest,
                 onSurface = LadColors.ink,
                 onSurfaceVariant = LadColors.muted,
             )
@@ -40,7 +43,11 @@ fun LadTheme(settings: Settings, content: @Composable () -> Unit) {
             styled.copy(
                 surface = Color.Black,
                 background = Color.Black,
-                surfaceContainerLow = Color.Black,
+                surfaceContainerLowest = Color.Black,
+                surfaceContainerLow = Color(0xFF0A0D10),
+                surfaceContainer = Color(0xFF12161A),
+                surfaceContainerHigh = Color(0xFF1B2127),
+                surfaceContainerHighest = Color(0xFF242B33),
             )
         else styled
     val textResources = dev.lad.i18n.rememberLocalizedText()

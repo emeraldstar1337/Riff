@@ -3,9 +3,19 @@
 package dev.lad.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,49 +40,108 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
+private enum class SettingsGroup(val title: Int) {
+    APPEARANCE(R.string.settings_group_appearance),
+    PLAYER_UI(R.string.settings_group_player),
+    SOUND_LIBRARY(R.string.settings_group_sound_library),
+    DATA_APP(R.string.settings_group_app),
+}
+
 private enum class SettingsPage(
+    val group: SettingsGroup,
     val title: Int,
     val detail: Int,
     val icon: ImageVector,
+    val keywords: List<Int> = emptyList(),
 ) {
     THEME(
+        SettingsGroup.APPEARANCE,
         R.string.theme_and_colours,
         R.string.light_dark_monet_and_custom_palettes,
         Icons.Default.Palette,
+        listOf(R.string.black_background, R.string.artwork_colours, R.string.system),
     ),
     SHAPES(
+        SettingsGroup.APPEARANCE,
         R.string.shapes_and_motion,
         R.string.artwork_shapes_and_transitions,
         Icons.Default.Category,
+        listOf(R.string.glow, R.string.album_atmosphere, R.string.abstract_shapes, R.string.motion),
     ),
     PLAYER(
+        SettingsGroup.PLAYER_UI,
         R.string.player,
-        R.string.layout_visualizer_and_track_transitions,
+        R.string.settings_player_detail,
         Icons.Default.MusicNote,
+        listOf(
+            R.string.seek_bar,
+            R.string.mini_player,
+            R.string.vinyl_artwork,
+            R.string.visualizer,
+            R.string.widget_settings_title,
+        ),
     ),
-    MINI(R.string.mini_player, R.string.size_and_playback_controls, Icons.Default.PlayCircle),
-    NAVIGATION(R.string.navigation, R.string.tabs_and_their_order, Icons.Default.Dashboard),
+    LYRICS(
+        SettingsGroup.PLAYER_UI,
+        R.string.settings_lyrics_title,
+        R.string.settings_lyrics_detail,
+        Icons.AutoMirrored.Filled.Notes,
+        listOf(R.string.lyrics_appearance, R.string.text_size, R.string.line_spacing),
+    ),
+    NAVIGATION(
+        SettingsGroup.PLAYER_UI,
+        R.string.navigation,
+        R.string.tabs_and_their_order,
+        Icons.Default.Dashboard,
+        listOf(R.string.your_order),
+    ),
     AUDIO(
+        SettingsGroup.SOUND_LIBRARY,
         R.string.sound_and_devices,
-        R.string.equalizer_balance_and_headphone_profiles,
+        R.string.settings_audio_detail,
         Icons.Default.Headphones,
+        listOf(
+            R.string.bit_perfect_title,
+            R.string.equalizer,
+            R.string.crossfade,
+            R.string.speed,
+            R.string.pause_on_disconnect,
+        ),
     ),
     LIBRARY(
+        SettingsGroup.SOUND_LIBRARY,
         R.string.settings_screen_library,
         R.string.folders_duration_duplicates_and_hidden_files,
         Icons.Default.Folder,
+        listOf(
+            R.string.included_folders,
+            R.string.excluded_folders,
+            R.string.merge_artists,
+            R.string.artist_photos,
+            R.string.minimum_duration,
+        ),
     ),
     HISTORY(
+        SettingsGroup.DATA_APP,
         R.string.history_and_recaps,
         R.string.statistics_and_listening_recaps,
         Icons.Default.Insights,
+        listOf(R.string.artwork_in_recaps, R.string.clear_history, R.string.recaps),
     ),
     LANGUAGE(
+        SettingsGroup.DATA_APP,
         R.string.language,
         R.string.russian_english_or_device_language,
         Icons.Default.Language,
+        listOf(R.string.date_format, R.string.app_language),
     ),
-    ABOUT(R.string.about_lad, R.string.version_and_features, Icons.Default.Info),
+    ABOUT(
+        SettingsGroup.DATA_APP,
+        R.string.about_lad,
+        R.string.version_and_features,
+        Icons.Default.Info,
+        listOf(R.string.font_license),
+    ),
 }
 
 @Composable
@@ -83,6 +152,7 @@ fun SettingsScreen(
     onDuplicates: () -> Unit = {},
 ) {
     val strings = rememberText()
+    val animations = LocalLadSettings.current.animations
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var included by remember { mutableStateOf(false) }
@@ -97,102 +167,145 @@ fun SettingsScreen(
         remember(vm) { vm.playback.state.map { it.current?.artwork }.distinctUntilChanged() }
     val artwork by cover.collectAsStateWithLifecycle(initialValue = null)
     val previewSeed = artworkSeed(artwork, settings.artworkColor)
-    val list = remember(page) { LazyListState() }
     LaunchedEffect(page) {
         if (page == SettingsPage.LIBRARY) vm.loadFolders()
         if (page == SettingsPage.AUDIO) vm.playback.connect()
     }
     BackHandler(page != null && !included && !excluded && !clear) { page = null }
 
-    LazyColumn(
-        state = list,
-        contentPadding = PaddingValues(LadSpacing.page),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        val activePage = page
-        if (activePage == null) {
-            item {
-                OutlinedTextField(
-                    query,
-                    { query = it },
-                    Modifier.fillMaxWidth(),
-                    placeholder = { Text(strings[R.string.find_a_setting]) },
-                    shape = LadShapes.hero,
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
+    AnimatedContent(
+        targetState = page,
+        transitionSpec = {
+            val forward = targetState != null && initialState == null
+            val sign = if (forward) 1 else -1
+            (fadeIn(LadMotion.defaultEffects(animations)) +
+                    slideInHorizontally(LadMotion.defaultSpatial(animations)) { it / 8 * sign })
+                .togetherWith(
+                    fadeOut(LadMotion.fastEffects(animations)) +
+                        slideOutHorizontally(LadMotion.defaultSpatial(animations)) {
+                            -it / 10 * sign
+                        }
                 )
-            }
-            SettingsPage.entries
-                .filter {
-                    query.isBlank() ||
-                        "${strings[it.title]} ${strings[it.detail]}".contains(query, true)
+        },
+        label = "settings page",
+    ) { activePage ->
+        val list = remember(activePage) { LazyListState() }
+        LazyColumn(
+            state = list,
+            contentPadding = PaddingValues(LadSpacing.page),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (activePage == null) {
+                item("search") {
+                    OutlinedTextField(
+                        query,
+                        { query = it },
+                        Modifier.fillMaxWidth(),
+                        placeholder = { Text(strings[R.string.find_a_setting]) },
+                        shape = LadShapes.hero,
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        trailingIcon =
+                            if (query.isNotEmpty()) {
+                                {
+                                    IconButton({ query = "" }) {
+                                        Icon(Icons.Default.Close, strings[R.string.clear])
+                                    }
+                                }
+                            } else null,
+                    )
                 }
-                .forEach { section ->
-                    item(section.name) {
-                        StyleChoice(
-                            strings[section.title],
-                            strings[section.detail],
-                            false,
-                            section.icon,
-                        ) {
-                            page = section
+                SettingsGroup.entries.forEach { group ->
+                    val pages =
+                        SettingsPage.entries.filter { section ->
+                            section.group == group &&
+                                (query.isBlank() ||
+                                    buildString {
+                                            append(strings[section.title]).append(' ')
+                                            append(strings[section.detail]).append(' ')
+                                            section.keywords.forEach { append(strings[it]).append(' ') }
+                                            if (section == SettingsPage.THEME) append("Monet ")
+                                            if (section == SettingsPage.AUDIO) append("ReplayGain ")
+                                        }
+                                        .contains(query, true))
+                        }
+                    if (pages.isNotEmpty()) {
+                        item("group-${group.name}") {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                SettingsGroupLabel(strings[group.title])
+                                Spacer(Modifier.height(4.dp))
+                                pages.forEachIndexed { idx, section ->
+                                    StyleChoice(
+                                        strings[section.title],
+                                        strings[section.detail],
+                                        selected = false,
+                                        icon = section.icon,
+                                        shape = segmentedItemShape(idx, pages.size),
+                                    ) {
+                                        page = section
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-        } else {
-            item {
-                TextButton(
-                    { page = null },
-                    shapes = ButtonDefaults.shapes(),
-                ) {
-                    Icon(Icons.Default.ChevronLeft, null)
-                    Text(strings[R.string.all_settings])
+            } else {
+                item("back") {
+                    TextButton(
+                        { page = null },
+                        shapes = ButtonDefaults.shapes(),
+                    ) {
+                        Icon(Icons.Default.ChevronLeft, null)
+                        Text(strings[R.string.all_settings])
+                    }
                 }
-            }
-            item { BitsTitle(strings[activePage.title]) }
-            when (activePage) {
-                SettingsPage.THEME -> themeSettingsSection(settings, strings, vm::updateSettings)
-                SettingsPage.SHAPES ->
-                    shapesSettingsSection(settings, previewSeed, strings, vm::updateSettings)
-                SettingsPage.PLAYER -> playerSettingsSection(settings, strings, vm::updateSettings)
-                SettingsPage.MINI -> miniPlayerSettingsSection(settings, strings, vm::updateSettings)
-                SettingsPage.NAVIGATION ->
-                    navigationSettingsSection(settings, strings, vm::updateSettings)
-                SettingsPage.AUDIO ->
-                    audioSettingsSection(
-                        settings = settings,
-                        bitPerfect = bitPerfect,
-                        strings = strings,
-                        onUpdate = vm::updateSettings,
-                        onOpenAudioPanel = { vm.audioOpen.value = true },
-                    )
-                SettingsPage.LIBRARY ->
-                    librarySettingsSection(
-                        settings = settings,
-                        strings = strings,
-                        onUpdate = vm::updateSettings,
-                        onRefresh = vm::refresh,
-                        onIncluded = { included = true },
-                        onExcluded = { excluded = true },
-                        onDuplicates = onDuplicates,
-                    )
-                SettingsPage.HISTORY ->
-                    historySettingsSection(
-                        settings = settings,
-                        strings = strings,
-                        onUpdate = vm::updateSettings,
-                        onDemo = onDemo,
-                        onClear = { clear = true },
-                    )
-                SettingsPage.LANGUAGE ->
-                    languageSettingsSection(
-                        settings = settings,
-                        language = language,
-                        strings = strings,
-                        onLanguage = vm::setLanguage,
-                        onUpdate = vm::updateSettings,
-                    )
-                SettingsPage.ABOUT -> aboutSettingsSection(strings)
+                item("title") { BitsTitle(strings[activePage.title]) }
+                when (activePage) {
+                    SettingsPage.THEME -> themeSettingsSection(settings, strings, vm::updateSettings)
+                    SettingsPage.SHAPES ->
+                        shapesSettingsSection(settings, previewSeed, strings, vm::updateSettings)
+                    SettingsPage.PLAYER ->
+                        playerSettingsSection(settings, strings, vm::updateSettings)
+                    SettingsPage.LYRICS ->
+                        lyricsSettingsSection(settings, strings, vm::updateSettings)
+                    SettingsPage.NAVIGATION ->
+                        navigationSettingsSection(settings, strings, vm::updateSettings)
+                    SettingsPage.AUDIO ->
+                        audioSettingsSection(
+                            settings = settings,
+                            bitPerfect = bitPerfect,
+                            strings = strings,
+                            onUpdate = vm::updateSettings,
+                            onOpenAudioPanel = { vm.audioOpen.value = true },
+                        )
+                    SettingsPage.LIBRARY ->
+                        librarySettingsSection(
+                            settings = settings,
+                            strings = strings,
+                            onUpdate = vm::updateSettings,
+                            onRefresh = vm::refresh,
+                            onIncluded = { included = true },
+                            onExcluded = { excluded = true },
+                            onDuplicates = onDuplicates,
+                        )
+                    SettingsPage.HISTORY ->
+                        historySettingsSection(
+                            settings = settings,
+                            strings = strings,
+                            onUpdate = vm::updateSettings,
+                            onDemo = onDemo,
+                            onClear = { clear = true },
+                        )
+                    SettingsPage.LANGUAGE ->
+                        languageSettingsSection(
+                            settings = settings,
+                            language = language,
+                            strings = strings,
+                            onLanguage = vm::setLanguage,
+                            onUpdate = vm::updateSettings,
+                        )
+                    SettingsPage.ABOUT -> aboutSettingsSection(strings)
+                }
             }
         }
     }
@@ -275,6 +388,7 @@ private fun LazyListScope.themeSettingsSection(
                 "rose" to strings[R.string.rose],
                 "amber" to strings[R.string.amber],
             ),
+            swatches = AccentColors,
         ) {
             onUpdate { current -> current.copy(accent = it, dynamicColor = false) }
         }
@@ -297,21 +411,6 @@ private fun LazyListScope.themeSettingsSection(
             onUpdate { current -> current.copy(artworkColor = it) }
         }
     }
-    item {
-        SectionTitle(
-            strings[R.string.recaps],
-            strings[R.string.statistics_card_appearance],
-        )
-    }
-    item {
-        SettingSwitch(
-            strings[R.string.artwork_in_recaps],
-            strings[R.string.recap_colours_follow_the_top_track],
-            settings.recapArtwork,
-        ) {
-            onUpdate { current -> current.copy(recapArtwork = it) }
-        }
-    }
 }
 
 private fun LazyListScope.shapesSettingsSection(
@@ -320,85 +419,6 @@ private fun LazyListScope.shapesSettingsSection(
     strings: TextResources,
     onUpdate: ((Settings) -> Settings) -> Unit,
 ) {
-    item {
-        SectionTitle(
-            strings[R.string.glow],
-            strings[R.string.the_main_area_of_the_artwork],
-        )
-    }
-    item { GlowStylePreview(settings, previewSeed) }
-    item {
-        ChoiceChips(
-            settings.glowPreset,
-            AppearancePresets.glow.map { it.id to strings.label(it.name) },
-        ) { id ->
-            onUpdate { current ->
-                AppearancePresets.glow.firstOrNull { it.id == id }?.apply(current) ?: current
-            }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.glow_intensity], settings.glowStrength, 0f..1.8f) {
-            onUpdate { current -> current.copy(glowPreset = "custom", glowStrength = it) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.glow_radius], settings.glowRadius, 0.5f..1.6f) {
-            onUpdate { current -> current.copy(glowPreset = "custom", glowRadius = it) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.saturation], settings.glowSaturation, 0f..1f) {
-            onUpdate { current -> current.copy(glowPreset = "custom", glowSaturation = it) }
-        }
-    }
-    item {
-        SettingSwitch(
-            strings[R.string.animated_glow],
-            strings[R.string.moves_only_while_music_is_playing],
-            settings.glowMotion,
-        ) {
-            onUpdate { current -> current.copy(glowMotion = it) }
-        }
-    }
-    item {
-        SettingSwitch(
-            strings[R.string.abstract_shapes],
-            strings[R.string.three_soft_background_shapes_they_move],
-            settings.glowShapes,
-        ) {
-            onUpdate { current -> current.copy(glowShapes = it) }
-        }
-    }
-    item { SectionTitle(strings[R.string.shape_type]) }
-    item {
-        ChoiceChips(
-            settings.shapeType,
-            listOf(
-                "mixed" to strings[R.string.mixed_shapes],
-                "flower" to strings[R.string.flower],
-                "pebble" to strings[R.string.pebble_shape],
-                "circle" to strings[R.string.circle],
-            ),
-        ) { value ->
-            onUpdate { it.copy(shapeType = value) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.shape_scale], settings.shapeScale, 0.5f..1.6f) { value ->
-            onUpdate { it.copy(shapeScale = value) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.shape_opacity], settings.shapeOpacity, 0.02f..0.24f) {
-            onUpdate { current -> current.copy(shapeOpacity = it) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.motion_speed], settings.motionSpeed, 0.3f..1.5f) {
-            onUpdate { current -> current.copy(motionSpeed = it) }
-        }
-    }
     item {
         SectionTitle(
             strings[R.string.artwork_title],
@@ -418,6 +438,15 @@ private fun LazyListScope.shapesSettingsSection(
         }
     }
     item { SectionTitle(strings[R.string.transitions], strings[R.string.interface_motion]) }
+    item {
+        SettingSwitch(
+            strings[R.string.motion],
+            strings[R.string.smooth_transitions_and_artwork_changes],
+            settings.animations,
+        ) {
+            onUpdate { current -> current.copy(animations = it) }
+        }
+    }
     item { SectionTitle(strings[R.string.cover_transition]) }
     item {
         ChoiceChips(
@@ -433,13 +462,10 @@ private fun LazyListScope.shapesSettingsSection(
         }
     }
     item {
-        SettingSwitch(
-            strings[R.string.motion],
-            strings[R.string.smooth_transitions_and_artwork_changes],
-            settings.animations,
-        ) {
-            onUpdate { current -> current.copy(animations = it) }
-        }
+        SectionTitle(
+            strings[R.string.glow],
+            strings[R.string.the_main_area_of_the_artwork],
+        )
     }
     item {
         SettingSwitch(
@@ -448,6 +474,82 @@ private fun LazyListScope.shapesSettingsSection(
             settings.ambientBackground,
         ) {
             onUpdate { current -> current.copy(ambientBackground = it) }
+        }
+    }
+    item { GlowStylePreview(settings, previewSeed) }
+    item {
+        AnimatedVisibility(
+            visible = settings.ambientBackground,
+            enter = fadeIn(LadMotion.defaultEffects(settings.animations)) + expandVertically(),
+            exit = fadeOut(LadMotion.fastEffects(settings.animations)) + shrinkVertically(),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChoiceChips(
+                    settings.glowPreset,
+                    AppearancePresets.glow.map { it.id to strings.label(it.name) },
+                ) { id ->
+                    onUpdate { current ->
+                        AppearancePresets.glow.firstOrNull { it.id == id }?.apply(current)
+                            ?: current
+                    }
+                }
+                AppearanceSlider(strings[R.string.glow_intensity], settings.glowStrength, 0f..1.8f) {
+                    onUpdate { current -> current.copy(glowPreset = "custom", glowStrength = it) }
+                }
+                AppearanceSlider(strings[R.string.glow_radius], settings.glowRadius, 0.5f..1.6f) {
+                    onUpdate { current -> current.copy(glowPreset = "custom", glowRadius = it) }
+                }
+                AppearanceSlider(strings[R.string.saturation], settings.glowSaturation, 0f..1f) {
+                    onUpdate { current -> current.copy(glowPreset = "custom", glowSaturation = it) }
+                }
+                SettingSwitch(
+                    strings[R.string.animated_glow],
+                    strings[R.string.moves_only_while_music_is_playing],
+                    settings.glowMotion,
+                ) {
+                    onUpdate { current -> current.copy(glowMotion = it) }
+                }
+                SettingSwitch(
+                    strings[R.string.abstract_shapes],
+                    strings[R.string.three_soft_background_shapes_they_move],
+                    settings.glowShapes,
+                ) {
+                    onUpdate { current -> current.copy(glowShapes = it) }
+                }
+                AnimatedVisibility(visible = settings.glowShapes) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SectionTitle(strings[R.string.shape_type])
+                        ChoiceChips(
+                            settings.shapeType,
+                            listOf(
+                                "mixed" to strings[R.string.mixed_shapes],
+                                "flower" to strings[R.string.flower],
+                                "pebble" to strings[R.string.pebble_shape],
+                                "circle" to strings[R.string.circle],
+                            ),
+                        ) { value ->
+                            onUpdate { it.copy(shapeType = value) }
+                        }
+                        AppearanceSlider(strings[R.string.shape_scale], settings.shapeScale, 0.5f..1.6f) { value ->
+                            onUpdate { it.copy(shapeScale = value) }
+                        }
+                        AppearanceSlider(
+                            strings[R.string.shape_opacity],
+                            settings.shapeOpacity,
+                            0.02f..0.24f,
+                        ) {
+                            onUpdate { current -> current.copy(shapeOpacity = it) }
+                        }
+                        AppearanceSlider(
+                            strings[R.string.motion_speed],
+                            settings.motionSpeed,
+                            0.3f..1.5f,
+                        ) {
+                            onUpdate { current -> current.copy(motionSpeed = it) }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -466,53 +568,6 @@ private fun LazyListScope.playerSettingsSection(
     item {
         SeekStyleChoices(settings.seekStyle) {
             onUpdate { current -> current.copy(seekStyle = it) }
-        }
-    }
-    item {
-        SectionTitle(
-            strings[R.string.lyrics_appearance],
-            strings[R.string.applies_to_synced_and_plain_lyrics],
-        )
-    }
-    item { LyricsStylePreview(settings) }
-    item {
-        ChoiceChips(
-            settings.lyricsPreset,
-            AppearancePresets.lyrics.map { it.id to strings.label(it.name) },
-        ) { id ->
-            onUpdate { current ->
-                AppearancePresets.lyrics.firstOrNull { it.id == id }?.apply(current) ?: current
-            }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.text_size], settings.lyricsSize, 16f..34f) {
-            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsSize = it) }
-        }
-    }
-    item {
-        AppearanceSlider(strings[R.string.line_spacing], settings.lyricsSpacing, 1.1f..1.7f) {
-            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsSpacing = it) }
-        }
-    }
-    item {
-        AppearanceSlider(
-            strings[R.string.inactive_line_brightness],
-            settings.lyricsDim,
-            0.2f..0.6f,
-        ) {
-            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsDim = it) }
-        }
-    }
-    item {
-        ChoiceChips(
-            settings.lyricsAlignment,
-            listOf(
-                "start" to strings[R.string.left_aligned],
-                "center" to strings[R.string.centred],
-            ),
-        ) {
-            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsAlignment = it) }
         }
     }
     item {
@@ -553,46 +608,10 @@ private fun LazyListScope.playerSettingsSection(
     }
     item {
         SectionTitle(
-            strings[R.string.track_transitions],
-            strings[R.string.extra_mixing_is_off_by_default],
+            strings[R.string.mini_player],
+            strings[R.string.size_and_playback_controls],
         )
     }
-    item {
-        SettingsSlider(
-            strings[R.string.crossfade],
-            if (settings.crossfadeSeconds == 0) strings[R.string.off]
-            else strings.format(R.string.s, settings.crossfadeSeconds),
-            settings.crossfadeSeconds.toFloat(),
-            0f..12f,
-            11,
-            enabled = !settings.bitPerfect,
-        ) {
-            onUpdate { current -> current.copy(crossfadeSeconds = it.toInt()) }
-        }
-    }
-    item {
-        SettingSwitch(
-            strings[R.string.pause_on_disconnect],
-            strings[R.string.when_an_audio_device_disconnects],
-            settings.pauseOnDisconnect,
-        ) {
-            onUpdate { current -> current.copy(pauseOnDisconnect = it) }
-        }
-    }
-}
-
-private fun LazyListScope.miniPlayerSettingsSection(
-    settings: Settings,
-    strings: TextResources,
-    onUpdate: ((Settings) -> Settings) -> Unit,
-) {
-    item {
-        SettingsNote(
-            strings[R.string.widget_settings_title],
-            strings[R.string.widget_settings_hint],
-        )
-    }
-    item { WidgetAddButtons() }
     item { MiniStylePreview(settings) }
     listOf(
             Triple("slim", R.string.slim, R.string.a_compact_row_with_music_and),
@@ -611,6 +630,67 @@ private fun LazyListScope.miniPlayerSettingsSection(
                 }
             }
         }
+    item {
+        SettingsNote(
+            strings[R.string.widget_settings_title],
+            strings[R.string.widget_settings_hint],
+        )
+    }
+    item { WidgetAddButtons() }
+}
+
+private fun LazyListScope.lyricsSettingsSection(
+    settings: Settings,
+    strings: TextResources,
+    onUpdate: ((Settings) -> Settings) -> Unit,
+) {
+    item {
+        SectionTitle(
+            strings[R.string.lyrics_appearance],
+            strings[R.string.applies_to_synced_and_plain_lyrics],
+        )
+    }
+    item { LyricsStylePreview(settings) }
+    item {
+        ChoiceChips(
+            settings.lyricsPreset,
+            AppearancePresets.lyrics.map { it.id to strings.label(it.name) },
+        ) { id ->
+            onUpdate { current ->
+                AppearancePresets.lyrics.firstOrNull { it.id == id }?.apply(current) ?: current
+            }
+        }
+    }
+    item {
+        ChoiceChips(
+            settings.lyricsAlignment,
+            listOf(
+                "start" to strings[R.string.left_aligned],
+                "center" to strings[R.string.centred],
+            ),
+        ) {
+            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsAlignment = it) }
+        }
+    }
+    item {
+        AppearanceSlider(strings[R.string.text_size], settings.lyricsSize, 16f..34f) {
+            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsSize = it) }
+        }
+    }
+    item {
+        AppearanceSlider(strings[R.string.line_spacing], settings.lyricsSpacing, 1.1f..1.7f) {
+            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsSpacing = it) }
+        }
+    }
+    item {
+        AppearanceSlider(
+            strings[R.string.inactive_line_brightness],
+            settings.lyricsDim,
+            0.2f..0.6f,
+        ) {
+            onUpdate { current -> current.copy(lyricsPreset = "custom", lyricsDim = it) }
+        }
+    }
 }
 
 private fun LazyListScope.navigationSettingsSection(
@@ -756,6 +836,34 @@ private fun LazyListScope.audioSettingsSection(
             onUpdate { current -> current.copy(speed = (it * 20).roundToInt() / 20f) }
         }
     }
+    item {
+        SectionTitle(
+            strings[R.string.track_transitions],
+            strings[R.string.extra_mixing_is_off_by_default],
+        )
+    }
+    item {
+        SettingsSlider(
+            strings[R.string.crossfade],
+            if (settings.crossfadeSeconds == 0) strings[R.string.off]
+            else strings.format(R.string.s, settings.crossfadeSeconds),
+            settings.crossfadeSeconds.toFloat(),
+            0f..12f,
+            11,
+            enabled = !settings.bitPerfect,
+        ) {
+            onUpdate { current -> current.copy(crossfadeSeconds = it.toInt()) }
+        }
+    }
+    item {
+        SettingSwitch(
+            strings[R.string.pause_on_disconnect],
+            strings[R.string.when_an_audio_device_disconnects],
+            settings.pauseOnDisconnect,
+        ) {
+            onUpdate { current -> current.copy(pauseOnDisconnect = it) }
+        }
+    }
 }
 
 private fun LazyListScope.librarySettingsSection(
@@ -767,24 +875,6 @@ private fun LazyListScope.librarySettingsSection(
     onExcluded: () -> Unit,
     onDuplicates: () -> Unit,
 ) {
-    item {
-        SettingSwitch(
-            strings[R.string.merge_artists],
-            strings[R.string.merge_artists_description],
-            settings.mergeArtists,
-        ) {
-            onUpdate { current -> current.copy(mergeArtists = it) }
-        }
-    }
-    item {
-        SettingSwitch(
-            strings[R.string.artist_photos],
-            strings[R.string.artist_photos_description],
-            settings.artistPhotos,
-        ) {
-            onUpdate { current -> current.copy(artistPhotos = it) }
-        }
-    }
     item {
         SettingsAction(
             strings[R.string.refresh_music],
@@ -835,6 +925,25 @@ private fun LazyListScope.librarySettingsSection(
             onUpdate { current -> current.copy(minimumSeconds = it.roundToInt()) }
         }
     }
+    item { SectionTitle(strings[R.string.artists]) }
+    item {
+        SettingSwitch(
+            strings[R.string.merge_artists],
+            strings[R.string.merge_artists_description],
+            settings.mergeArtists,
+        ) {
+            onUpdate { current -> current.copy(mergeArtists = it) }
+        }
+    }
+    item {
+        SettingSwitch(
+            strings[R.string.artist_photos],
+            strings[R.string.artist_photos_description],
+            settings.artistPhotos,
+        ) {
+            onUpdate { current -> current.copy(artistPhotos = it) }
+        }
+    }
 }
 
 private fun LazyListScope.historySettingsSection(
@@ -854,7 +963,16 @@ private fun LazyListScope.historySettingsSection(
             onUpdate { current -> current.copy(statistics = it) }
         }
     }
-    item { SectionTitle(strings[R.string.recaps]) }
+    item { SectionTitle(strings[R.string.recaps], strings[R.string.statistics_card_appearance]) }
+    item {
+        SettingSwitch(
+            strings[R.string.artwork_in_recaps],
+            strings[R.string.recap_colours_follow_the_top_track],
+            settings.recapArtwork,
+        ) {
+            onUpdate { current -> current.copy(recapArtwork = it) }
+        }
+    }
     item {
         SettingsAction(
             strings[R.string.season_demo],

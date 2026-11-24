@@ -59,16 +59,15 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                 ) {
                     save(profile.copy(enabled = it))
                 }
-                androidx.compose.foundation.lazy.LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(SoundProfiles.presets.size) { i ->
-                        val entry = SoundProfiles.presets.entries.toList()[i]
-                        ToggleButton(
-                            profile.enabled && profile.bands == entry.value,
-                            { save(profile.copy(enabled = true, bands = entry.value)) },
-                            content = { Text(strings.label(entry.key)) },
-                        )
+                val presets = remember { SoundProfiles.presets.entries.toList() }
+                ChoiceChips(
+                    if (profile.enabled)
+                        presets.firstOrNull { it.value == profile.bands }?.key.orEmpty()
+                    else "",
+                    presets.map { it.key to strings.label(it.key) },
+                ) { selectedKey ->
+                    presets.firstOrNull { it.key == selectedKey }?.let { entry ->
+                        save(profile.copy(enabled = true, bands = entry.value))
                     }
                 }
                 Surface(

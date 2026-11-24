@@ -67,14 +67,15 @@ internal fun SeekBar(
                         (currentCoroutineContext()[MotionDurationScale]?.scaleFactor ?: 1f) > 0f
                 ) withFrameNanos { now ->
                     if (previous == 0L) previous = now
-                    if (now - previous >= 33_333_333L) {
+                    val deltaNs = now - previous
+                    if (deltaNs > 0L) {
                         val elapsed =
                             (android.os.SystemClock.elapsedRealtime() - positionTimestampMs)
                                 .coerceIn(0, 2000)
                         position.floatValue = (value + elapsed * speed).coerceAtMost(maximum)
                         if (wavy)
                             phase.floatValue =
-                                (phase.floatValue + (now - previous) / 1_000_000_000f * 1.8f) %
+                                (phase.floatValue + deltaNs / 1_000_000_000f * 1.8f) %
                                     (2 * PI).toFloat()
                         previous = now
                     }

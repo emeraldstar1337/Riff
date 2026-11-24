@@ -103,27 +103,44 @@ class UsbBitPerfect(context: Context, private val onChanged: () -> Unit) {
                 return false
             }
             track = value
-            reportLocked(BitPerfectState(BitPerfectStatus.PREPARING, format))
+            reportLocked(
+                BitPerfectState(
+                    BitPerfectStatus.PREPARING,
+                    format,
+                    device.productName?.toString()?.takeIf { it.isNotBlank() },
+                )
+            )
             true
         }
 
     fun configureFailed() =
         synchronized(lock) {
             if (enabled && selected != null && supported.isNotEmpty())
-                reportLocked(BitPerfectState(BitPerfectStatus.FORMAT_UNSUPPORTED))
+                reportLocked(
+                    BitPerfectState(
+                        BitPerfectStatus.FORMAT_UNSUPPORTED,
+                        deviceName = selected?.productName?.toString()?.takeIf { it.isNotBlank() },
+                    )
+                )
             else publishAvailabilityLocked()
         }
 
     fun reject() =
         synchronized(lock) {
             clearLocked()
-            reportLocked(BitPerfectState(BitPerfectStatus.UNAVAILABLE))
+            reportLocked(
+                BitPerfectState(
+                    BitPerfectStatus.UNAVAILABLE,
+                    deviceName = selected?.productName?.toString()?.takeIf { it.isNotBlank() },
+                )
+            )
         }
 
     fun state(): BitPerfectState =
         synchronized(lock) {
             val value = track
             val format = current.format
+            val name = selected?.productName?.toString()?.takeIf { it.isNotBlank() }
             if (Build.VERSION.SDK_INT >= 34 && enabled && value != null && format != null) {
                 val routed = runCatching { value.routedDevice }.getOrNull()
                 val matches =
@@ -136,9 +153,9 @@ class UsbBitPerfect(context: Context, private val onChanged: () -> Unit) {
                     if (matches) BitPerfectStatus.ACTIVE
                     else if (routed != null) BitPerfectStatus.UNAVAILABLE
                     else BitPerfectStatus.PREPARING
-                return BitPerfectState(status, format)
+                return BitPerfectState(status, format, name)
             }
-            current
+            current.copy(deviceName = name)
         }
 
     fun detach(value: AudioTrack?) =
@@ -184,10 +201,23 @@ class UsbBitPerfect(context: Context, private val onChanged: () -> Unit) {
     @RequiresApi(34)
     private inner class Native {
         private var appliedDevice: AudioDeviceInfo? = null
+        private var appliedFormat: AudioFormat? = null
         private val listener =
-            AudioManager.OnPreferredMixerAttributesChangedListener { attr, device, _ ->
-                if (attr.usage == AudioAttributes.USAGE_MEDIA && device.id == selected?.id)
+            AudioManager.OnPreferredMixerAttributesChangedListener { attr, device, mixer ->
+                if (attr.usage == AudioAttributes.USAGE_MEDIA && device.id == selected?.id) {
+                    synchronized(lock) {
+                        if (
+                            mixer == null ||
+                                mixer.mixerBehavior != AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT
+                        ) {
+                            if (appliedDevice?.id == device.id) {
+                                appliedDevice = null
+                                appliedFormat = null
+                            }
+                        }
+                    }
                     handler.post(onChanged)
+                }
             }
 
         init {
@@ -204,25 +234,42 @@ class UsbBitPerfect(context: Context, private val onChanged: () -> Unit) {
                             it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT
                         }
                         .mapNotNull { it.format.toPcm() }
+                        .distinct()
                 }
                 .getOrDefault(emptyList())
 
         fun apply(format: PcmFormat): AudioFormat? =
             runCatching {
                     val device = selected ?: return null
-                    val preferred =
-                        manager.getSupportedMixerAttributes(device).firstOrNull {
+                    val matching =
+                        manager.getSupportedMixerAttributes(device).filter {
                             it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
                                 it.format.toPcm() == format
-                        } ?: return null
-                    if (appliedDevice?.id != device.id) clear()
+                        }
+                    val preferred =
+                        matching.firstOrNull {
+                            it.format.channelMask != AudioFormat.CHANNEL_INVALID &&
+                                it.format.channelMask != 0
+                        } ?: matching.firstOrNull() ?: return null
+                    val alreadyApplied =
+                        appliedDevice?.id == device.id &&
+                            appliedFormat != null &&
+                            formatsEquivalent(appliedFormat!!, preferred.format) &&
+                            matches(format, preferred.format)
+                    if (alreadyApplied) return preferred.format
+                    if (appliedDevice != null) clear()
                     val requested =
                         AudioMixerAttributes.Builder(preferred.format)
                             .setMixerBehavior(AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT)
                             .build()
                     val accepted =
                         manager.setPreferredMixerAttributes(playbackAttributes, device, requested)
-                    if (accepted) appliedDevice = device else clear()
+                    if (accepted) {
+                        appliedDevice = device
+                        appliedFormat = preferred.format
+                    } else {
+                        clear()
+                    }
                     if (accepted) preferred.format else null
                 }
                 .getOrNull()
@@ -232,18 +279,29 @@ class UsbBitPerfect(context: Context, private val onChanged: () -> Unit) {
                 manager.getPreferredMixerAttributes(playbackAttributes, device)?.let {
                     it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT &&
                         it.format.toPcm() == format &&
-                        it.format.encoding == actual.encoding &&
-                        it.format.sampleRate == actual.sampleRate &&
-                        it.format.channelMask == actual.channelMask &&
-                        it.format.channelIndexMask == actual.channelIndexMask
+                        formatsEquivalent(it.format, actual)
                 }
             } == true
+
+        private fun formatsEquivalent(expected: AudioFormat, actual: AudioFormat): Boolean {
+            if (expected.encoding != actual.encoding) return false
+            if (expected.sampleRate != actual.sampleRate) return false
+            if (expected.channelCount != actual.channelCount) return false
+            val expectedPos = expected.channelMask
+            val actualPos = actual.channelMask
+            if (expectedPos != 0 && actualPos != 0 && expectedPos != actualPos) return false
+            val expectedIdx = expected.channelIndexMask
+            val actualIdx = actual.channelIndexMask
+            if (expectedIdx != 0 && actualIdx != 0 && expectedIdx != actualIdx) return false
+            return true
+        }
 
         fun clear() {
             appliedDevice?.let {
                 runCatching { manager.clearPreferredMixerAttributes(playbackAttributes, it) }
             }
             appliedDevice = null
+            appliedFormat = null
         }
 
         fun close() {

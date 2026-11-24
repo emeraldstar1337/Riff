@@ -32,6 +32,7 @@ enum class BitPerfectStatus {
 data class BitPerfectState(
     val status: BitPerfectStatus = BitPerfectStatus.OFF,
     val format: PcmFormat? = null,
+    val deviceName: String? = null,
 )
 
 object BitPerfectPolicy {

@@ -558,5 +558,13 @@
 <string name="cards_transition">Карточки</string>
 <string name="morph_transition">Смена формы</string>
     <string name="artist_photos">Фото исполнителей из сети</string>
-    <string name="artist_photos_description">Фото из Apple Music с кешированием на устройстве. Нажми на фото в профиле, чтобы открыть источник.</string>
+    <string name="artist_photos_description">Фото из Deezer и Apple Music с кешированием на устройстве. Нажми на фото в профиле, чтобы открыть источник.</string>
+    <string name="settings_group_appearance">Внешний вид</string>
+    <string name="settings_group_player">Плеер и интерфейс</string>
+    <string name="settings_group_sound_library">Звук и библиотека</string>
+    <string name="settings_group_app">Данные и приложение</string>
+    <string name="settings_lyrics_title">Текст песен</string>
+    <string name="settings_lyrics_detail">Размер, интервал, выравнивание и яркость</string>
+    <string name="settings_player_detail">Вид экрана, ползунок, мини-плеер и виджеты</string>
+    <string name="settings_audio_detail">Bit-perfect, эквалайзер, кроссфейд и устройства</string>
 </resources>

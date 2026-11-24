@@ -4,6 +4,11 @@ package dev.lad.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -21,7 +26,9 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -160,17 +167,19 @@ fun LyricsContent(
     LaunchedEffect(userDragging) { if (userDragging) following = false }
     LaunchedEffect(current, lines, following, visible) {
         if (visible && following && current >= 0 && lines.isNotEmpty()) {
-
             withFrameNanos {}
-            val offset = -list.layoutInfo.viewportSize.height / 3
+            val viewport = list.layoutInfo.viewportSize.height
+            if (viewport <= 0) return@LaunchedEffect
             val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == current }
-            if (!animations) list.scrollToItem(current, offset)
+            val anchor = (viewport * 0.30f).toInt()
+            val targetOffset = -(anchor - (item?.size ?: 0) / 2).coerceAtLeast(0)
+            if (!animations) list.scrollToItem(current, targetOffset)
             else if (item != null)
                 list.animateScrollBy(
-                    (item.offset + offset).toFloat(),
-                    spring(dampingRatio = 1f, stiffness = 65f),
+                    (item.offset + targetOffset).toFloat(),
+                    spring(dampingRatio = 0.88f, stiffness = 140f),
                 )
-            else list.animateScrollToItem(current, offset)
+            else list.animateScrollToItem(current, targetOffset)
         }
     }
     if (timingOpen)
@@ -316,99 +325,131 @@ fun LyricsContent(
                     )
             }
         }
-        when {
-            loading ->
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                        Text(
-                            strings[R.string.finding_synced_lyrics],
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            lines.isNotEmpty() ->
-                LazyColumn(
-                    state = list,
-                    modifier = Modifier.fillMaxWidth().weight(1f).lyricEdges(),
-                    contentPadding =
-                        PaddingValues(start = 12.dp, end = 12.dp, top = 56.dp, bottom = 260.dp),
-                    verticalArrangement =
-                        Arrangement.spacedBy(
-                            ((LocalLadSettings.current.lyricsSpacing - 1f) * 48f).dp
-                        ),
-                ) {
-                    itemsIndexed(lines, key = { index, line -> "$index:${line.timeMs}" }) {
-                        index,
-                        line ->
-                        LyricLineText(
-                            line,
-                            index == current,
-                            position,
-                            {
-                                vm.playback.seek((line.timeMs - offset).coerceAtLeast(0))
-                                following = true
-                            },
-                            Modifier.testTag("lyric-line-$index"),
-                            clock = timing.clock.takeIf { visible },
-                            endTimeMs = lines.getOrNull(index + 1)?.timeMs,
-                            distance = if (current >= 0) kotlin.math.abs(index - current) else 0,
-                        )
-                    }
-                }
-            !record?.text.isNullOrBlank() ->
-                Column(
-                    Modifier.fillMaxWidth()
-                        .weight(1f)
-                        .lyricEdges()
-                        .verticalScroll(rememberScrollState())
-                        .padding(vertical = 20.dp)
-                ) {
-                    Text(
-                        strings[R.string.no_timestamps_you_can_replace_this],
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        record?.text.orEmpty(),
-                        Modifier.fillMaxWidth(),
-                        style = lyricTextStyle(LocalLadSettings.current),
-                        textAlign =
-                            if (LocalLadSettings.current.lyricsAlignment == "center")
-                                TextAlign.Center
-                            else TextAlign.Start,
-                    )
-                }
-            else ->
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Notes,
-                            null,
-                            Modifier.size(32.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            strings[R.string.synced_lyrics_not_found_yet],
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Text(
-                            error ?: strings[R.string.find_another_recording_or_import_an],
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(
-                            { search = true },
-                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+        val viewState =
+            when {
+                loading -> 0
+                lines.isNotEmpty() -> 1
+                !record?.text.isNullOrBlank() -> 2
+                else -> 3
+            }
+        AnimatedContent(
+            targetState = viewState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            transitionSpec = {
+                (fadeIn(LadMotion.defaultEffects(animations)) +
+                        slideInVertically(LadMotion.defaultSpatial(animations)) { it / 18 })
+                    .togetherWith(fadeOut(LadMotion.fastEffects(animations)))
+            },
+            label = "lyrics content state",
+        ) { mode ->
+            when (mode) {
+                0 ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(strings[R.string.find_another_version])
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                            Text(
+                                strings[R.string.finding_synced_lyrics],
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
                     }
-                }
+                1 ->
+                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                        val topInset = (maxHeight * 0.28f).coerceAtLeast(48.dp)
+                        val bottomInset = (maxHeight * 0.56f).coerceAtLeast(180.dp)
+                        val gap =
+                            ((LocalLadSettings.current.lyricsSpacing.coerceIn(1.1f, 1.7f) - 1f) *
+                                    28f)
+                                .coerceAtLeast(4f)
+                                .dp
+                        LazyColumn(
+                            state = list,
+                            modifier = Modifier.fillMaxSize().lyricEdges(),
+                            contentPadding =
+                                PaddingValues(
+                                    start = 4.dp,
+                                    end = 4.dp,
+                                    top = topInset,
+                                    bottom = bottomInset,
+                                ),
+                            verticalArrangement = Arrangement.spacedBy(gap),
+                        ) {
+                            itemsIndexed(lines, key = { index, line -> "$index:${line.timeMs}" }) {
+                                index,
+                                line ->
+                                LyricLineText(
+                                    line,
+                                    index == current,
+                                    position,
+                                    {
+                                        vm.playback.seek((line.timeMs - offset).coerceAtLeast(0))
+                                        following = true
+                                    },
+                                    Modifier.testTag("lyric-line-$index"),
+                                    clock = timing.clock.takeIf { visible },
+                                    endTimeMs = lines.getOrNull(index + 1)?.timeMs,
+                                    distance =
+                                        if (current >= 0) kotlin.math.abs(index - current) else 0,
+                                )
+                            }
+                        }
+                    }
+                2 ->
+                    Column(
+                        Modifier.fillMaxSize()
+                            .lyricEdges()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 28.dp)
+                    ) {
+                        Text(
+                            strings[R.string.no_timestamps_you_can_replace_this],
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            record?.text.orEmpty(),
+                            Modifier.fillMaxWidth(),
+                            style = lyricTextStyle(LocalLadSettings.current),
+                            textAlign =
+                                if (LocalLadSettings.current.lyricsAlignment == "center")
+                                    TextAlign.Center
+                                else TextAlign.Start,
+                        )
+                    }
+                else ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            Modifier.padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Notes,
+                                null,
+                                Modifier.size(32.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                strings[R.string.synced_lyrics_not_found_yet],
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                            Text(
+                                error ?: strings[R.string.find_another_recording_or_import_an],
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            TextButton(
+                                { search = true },
+                                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                            ) {
+                                Text(strings[R.string.find_another_version])
+                            }
+                        }
+                    }
+            }
         }
     }
     if (editing) {
@@ -588,6 +629,12 @@ internal fun lyricTextStyle(appearance: Settings) =
             (appearance.lyricsSize.coerceIn(16f, 34f) *
                     appearance.lyricsSpacing.coerceIn(1.1f, 1.7f))
                 .sp,
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+        lineHeightStyle =
+            LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.None,
+            ),
     )
 
 internal fun Modifier.lyricEdges(): Modifier =

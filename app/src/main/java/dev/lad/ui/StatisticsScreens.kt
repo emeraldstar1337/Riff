@@ -16,12 +16,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.lad.LadApplication
 import dev.lad.R
 import dev.lad.data.*
+import dev.lad.domain.ArtistCredits
 import dev.lad.i18n.rememberText
 import dev.lad.statistics.*
 import dev.lad.statistics.Period
@@ -31,8 +34,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun RankingRow(rank: Ranking, index: Int) {
+fun RankingRow(rank: Ranking, index: Int, artistTracks: List<Track> = emptyList()) {
     val strings = rememberText()
+    val isArtist = rank.detail == "Artist"
     Row(
         Modifier.fillMaxWidth().padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -44,7 +48,17 @@ fun RankingRow(rank: Ranking, index: Int) {
             fontWeight = FontWeight.Black,
             modifier = Modifier.width(24.dp),
         )
-        Artwork(rank.artwork, rank.name, Modifier.size(48.dp), 16)
+        if (isArtist) {
+            ArtistPortrait(
+                name = rank.name,
+                tracks = artistTracks,
+                modifier = Modifier.size(48.dp),
+                round = 12,
+                fallbackArtwork = rank.artwork.ifBlank { null },
+            )
+        } else {
+            Artwork(rank.artwork, rank.name, Modifier.size(48.dp), 12)
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 rank.name,
@@ -53,7 +67,7 @@ fun RankingRow(rank: Ranking, index: Int) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                rank.detail,
+                strings.label(rank.detail),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall,
@@ -61,9 +75,23 @@ fun RankingRow(rank: Ranking, index: Int) {
         }
         Text(
             strings.format(R.string.statistics_screens_min, rank.listenedMs / 60_000),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
         )
     }
+}
+
+private fun tracksForArtist(
+    name: String,
+    tracks: List<Track>,
+    mergeArtists: Boolean,
+): List<Track> {
+    if (tracks.isEmpty()) return emptyList()
+    val grouped =
+        ArtistCredits(tracks.map { it.artist }, mergeArtists)
+            .groups(tracks) { it.artist }
+            .firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?.items
+    return grouped ?: tracks.filter { it.artist.contains(name, ignoreCase = true) }
 }
 
 private data class PersonalRecords(
@@ -123,14 +151,11 @@ fun StatisticsScreen(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(Period.entries) { p ->
-                    ToggleButton(
-                        checked = period == p.ordinal,
-                        onCheckedChange = { period = p.ordinal },
-                        content = { Text(strings.label(p.label)) },
-                    )
-                }
+            ChoiceChips(
+                period.toString(),
+                Period.entries.map { it.ordinal.toString() to strings.label(it.label) },
+            ) {
+                period = it.toInt()
             }
         }
         item {
@@ -312,7 +337,11 @@ fun StatisticsScreen(
             }
             item { SectionTitle(strings[R.string.statistics_screens_artists]) }
             itemsIndexed(stats.artists.take(5), key = { i, r -> "a:${r.name}:$i" }) { i, r ->
-                RankingRow(r, i)
+                val artistTrackList =
+                    remember(r.name, tracks, mergeArtists) {
+                        tracksForArtist(r.name, tracks, mergeArtists)
+                    }
+                RankingRow(r, i, artistTrackList)
             }
             item {
                 SectionTitle(strings[R.string.most_played_album], stats.albums.firstOrNull()?.name)
@@ -373,14 +402,41 @@ fun RecapScreen(
     onClose: () -> Unit,
     animations: Boolean,
     settings: Settings,
+    tracks: List<Track> = emptyList(),
 ) {
     val strings = rememberText()
+    val context = LocalContext.current
+    val artistRepo = (context.applicationContext as? LadApplication)?.artistPhotos
     val slides =
         remember(stats, label, year, strings) { RecapGenerator.slides(stats, label, year, strings) }
     val pager = rememberPagerState(pageCount = { slides.size })
     val scope = rememberCoroutineScope()
     val currentSlide = slides[pager.currentPage]
-    val cover = currentSlide.ranking.firstOrNull()?.artwork ?: stats.tracks.firstOrNull()?.artwork
+    val leadRank = currentSlide.ranking.firstOrNull()
+    val leadArtistTracks =
+        remember(leadRank?.name, leadRank?.detail, tracks, settings.mergeArtists) {
+            if (leadRank?.detail == "Artist")
+                tracksForArtist(leadRank.name, tracks, settings.mergeArtists)
+            else emptyList()
+        }
+    val leadArtistPhoto by
+        produceState<String?>(
+            if (leadRank?.detail == "Artist" && settings.artistPhotos)
+                artistRepo?.peek(leadRank.name)?.image
+            else null,
+            leadRank?.name,
+            leadRank?.detail,
+            leadArtistTracks,
+            settings.artistPhotos,
+            artistRepo,
+        ) {
+            value =
+                if (leadRank?.detail == "Artist" && settings.artistPhotos && artistRepo != null) {
+                    artistRepo.peek(leadRank.name)?.image
+                        ?: artistRepo.find(leadRank.name, leadArtistTracks)?.image
+                } else null
+        }
+    val cover = leadArtistPhoto ?: leadRank?.artwork ?: stats.tracks.firstOrNull()?.artwork
     val seed =
         artworkSeed(cover, settings.recapArtwork)
             ?: (AccentColors[settings.accent] ?: AccentColors.getValue("violet"))
@@ -412,7 +468,7 @@ fun RecapScreen(
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.weight(1f),
                         )
-                        RecapShareButton(stats, slides[pager.currentPage], label)
+                        RecapShareButton(stats, slides[pager.currentPage], label, tracks)
                         IconButton(onClick = onClose) {
                             Icon(Icons.Default.Close, strings[R.string.close_recap])
                         }
@@ -468,15 +524,43 @@ fun RecapScreen(
                                 )
                             }
                             if (slide.ranking.isNotEmpty() && index in listOf(3, 5, 7)) {
-                                Artwork(
-                                    slide.ranking.first().artwork,
-                                    slide.value,
-                                    Modifier.size(152.dp),
-                                    38,
-                                )
+                                val topItem = slide.ranking.first()
+                                if (topItem.detail == "Artist") {
+                                    val topArtistTracks =
+                                        remember(topItem.name, tracks, settings.mergeArtists) {
+                                            tracksForArtist(
+                                                topItem.name,
+                                                tracks,
+                                                settings.mergeArtists,
+                                            )
+                                        }
+                                    ArtistPortrait(
+                                        name = topItem.name,
+                                        tracks = topArtistTracks,
+                                        modifier = Modifier.size(152.dp),
+                                        openSource = true,
+                                        round = 28,
+                                        fallbackArtwork = topItem.artwork.ifBlank { null },
+                                    )
+                                } else {
+                                    Artwork(
+                                        topItem.artwork,
+                                        slide.value,
+                                        Modifier.size(152.dp),
+                                        28,
+                                    )
+                                }
                             }
                             Text(slide.caption, style = MaterialTheme.typography.titleMedium)
-                            slide.ranking.forEachIndexed { i, r -> RankingRow(r, i) }
+                            slide.ranking.forEachIndexed { i, r ->
+                                val rowArtistTracks =
+                                    remember(r.name, r.detail, tracks, settings.mergeArtists) {
+                                        if (r.detail == "Artist")
+                                            tracksForArtist(r.name, tracks, settings.mergeArtists)
+                                        else emptyList()
+                                    }
+                                RankingRow(r, i, rowArtistTracks)
+                            }
                             if (stats.totalMs == 0L && !label.contains(strings[R.string.demo]))
                                 Text(
                                     strings[R.string.no_listening_activity_in_this_period],

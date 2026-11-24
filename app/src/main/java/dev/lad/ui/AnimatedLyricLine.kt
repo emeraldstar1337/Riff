@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import android.os.SystemClock
@@ -5,11 +7,13 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -17,14 +21,17 @@ import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -50,6 +57,14 @@ internal fun LyricLineText(
     val appearance = LocalLadSettings.current
     val animations = appearance.animations
     val owner = LocalLifecycleOwner.current
+    val layoutDirection = LocalLayoutDirection.current
+    val centered = appearance.lyricsAlignment == "center"
+    val pivot =
+        when {
+            centered -> TransformOrigin.Center
+            layoutDirection == LayoutDirection.Rtl -> TransformOrigin(1f, 0.5f)
+            else -> TransformOrigin(0f, 0.5f)
+        }
     val time = remember(line) { mutableLongStateOf(positionMs) }
     LaunchedEffect(active, clock, positionMs, animations, owner) {
         time.longValue = positionMs
@@ -79,28 +94,31 @@ internal fun LyricLineText(
             }
         }
     }
+    // M3 Expressive motion: effects springs (damping 1.0, zero overshoot) for opacity/color/blur,
+    // spatial springs for geometry (scale, subtle rise) anchored on alignment edge.
     val focus by
         animateFloatAsState(
             if (active) 1f else 0f,
-            tween(if (animations) 640 else 0),
+            if (animations) MaterialTheme.motionScheme.defaultEffectsSpec() else snap(),
             label = "lyric presence",
         )
+    // Scale inactive down to 0.95f and active to 1.0f so active text renders 1:1 sharp & never clips
     val emphasis by
         animateFloatAsState(
-            if (active) 1.035f else 1f,
-            if (animations) spring(dampingRatio = .85f, stiffness = 105f) else snap(),
+            if (active || !animations) 1f else 0.95f,
+            if (animations) MaterialTheme.motionScheme.defaultSpatialSpec() else snap(),
             label = "lyric focus",
         )
     val lift by
         animateFloatAsState(
-            if (active) -2f else 0f,
-            tween(if (animations) 640 else 0, easing = FastOutSlowInEasing),
+            if (active && animations) -2f else 0f,
+            if (animations) MaterialTheme.motionScheme.defaultSpatialSpec() else snap(),
             label = "lyric rise",
         )
     val softFocus by
         animateFloatAsState(
-            if (active || distance < 2 || !animations) 0f else distance.coerceAtMost(4) * .35f,
-            tween(if (animations) 640 else 0),
+            if (active || distance < 2 || !animations) 0f else distance.coerceAtMost(4) * .32f,
+            if (animations) MaterialTheme.motionScheme.defaultEffectsSpec() else snap(),
             label = "lyric depth",
         )
     val scheme = MaterialTheme.colorScheme
@@ -118,11 +136,16 @@ internal fun LyricLineText(
                             )
                     }
             ),
-            tween(if (animations) 640 else 0),
+            if (animations) MaterialTheme.motionScheme.defaultEffectsSpec() else snap(),
             label = "lyric light",
         )
     var layout by
-        remember(line.text, appearance.lyricsSize, appearance.lyricsAlignment) {
+        remember(
+            line.text,
+            appearance.lyricsSize,
+            appearance.lyricsSpacing,
+            appearance.lyricsAlignment,
+        ) {
             mutableStateOf<TextLayoutResult?>(null)
         }
     val mask = remember { Path() }
@@ -131,9 +154,11 @@ internal fun LyricLineText(
         line.text.ifBlank { "♪" },
         modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
             .graphicsLayer {
+                transformOrigin = pivot
                 scaleX = emphasis
                 scaleY = emphasis
                 translationY = lift.dp.toPx()
@@ -205,7 +230,7 @@ internal fun LyricLineText(
                                             shadow =
                                                 if (animations && progress < 1f)
                                                     Shadow(
-                                                        highlight.copy(alpha = .45f),
+                                                        highlight.copy(alpha = .4f),
                                                         Offset.Zero,
                                                         6.dp.toPx(),
                                                     )
@@ -219,9 +244,8 @@ internal fun LyricLineText(
                 }
             },
         style = lyricTextStyle(appearance),
-        textAlign =
-            if (appearance.lyricsAlignment == "center") TextAlign.Center else TextAlign.Start,
-        fontWeight = FontWeight.Black,
+        textAlign = if (centered) TextAlign.Center else TextAlign.Start,
+        fontWeight = FontWeight.Bold,
         color = color,
         onTextLayout = { layout = it },
     )

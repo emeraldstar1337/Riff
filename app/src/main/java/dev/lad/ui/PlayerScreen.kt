@@ -9,6 +9,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.selection.selectable
@@ -28,6 +29,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -43,11 +46,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import coil.imageLoader
+import coil.request.ImageRequest
 import dev.lad.R
 import dev.lad.data.*
 import dev.lad.domain.RepeatMode
 import dev.lad.i18n.rememberText
 import dev.lad.playback.PlaybackState
+import dev.lad.preferHighestRefreshRate
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
@@ -71,9 +77,8 @@ fun MiniPlayer(
             .padding(horizontal = 12.dp, vertical = 4.dp)
             .testTag("mini-player")
             .clickable(onClick = onOpen),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column(Modifier.padding(horizontal = 12.dp)) {
             Row(
@@ -84,11 +89,11 @@ fun MiniPlayer(
                 if (!slim)
                     Crossfade(
                         track.artwork,
-                        animationSpec =
-                            tween(LadMotion.duration(LadMotion.standard, settings.animations)),
+                        animationSpec = LadMotion.defaultEffects(settings.animations),
                         label = "mini cover",
                     ) { uri ->
-                        Artwork(uri, track.title, Modifier.size(44.dp), 12)
+                        // Concentric nested radius: 28dp outer - 12dp padding = 16dp
+                        Artwork(uri, track.title, Modifier.size(44.dp), 16)
                     }
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -167,7 +172,7 @@ fun SoundWave(levels: List<Float>, playing: Boolean, modifier: Modifier = Modifi
             val value by
                 animateFloatAsState(
                     target,
-                    tween(if (enabled) LadMotion.quick else 0),
+                    LadMotion.fastSpatial(enabled),
                     label = "PCM envelope",
                 )
             value
@@ -190,47 +195,65 @@ fun SoundWave(levels: List<Float>, playing: Boolean, modifier: Modifier = Modifi
 @Composable
 internal fun PlayerTabs(lyrics: Boolean, onChange: (Boolean) -> Unit) {
     val strings = rememberText()
+    val animations = LocalLadSettings.current.animations
+    val indicatorFraction by
+        animateFloatAsState(
+            if (lyrics) 1f else 0f,
+            if (animations) MaterialTheme.motionScheme.defaultSpatialSpec() else snap(),
+            label = "tab indicator",
+        )
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
         modifier =
             Modifier.widthIn(max = 280.dp).fillMaxWidth().height(48.dp).testTag("player-tabs"),
     ) {
-        Row(
-            Modifier.fillMaxSize().padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            listOf(false, true).forEach { value ->
-                val selected = value == lyrics
-                Row(
-                    Modifier.weight(1f)
-                        .fillMaxHeight()
-                        .clip(CircleShape)
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
-                        )
-                        .selectable(selected, onClick = { onChange(value) }, role = Role.Tab)
-                        .testTag(if (value) "lyrics-tab" else "artwork-tab"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-                ) {
-                    CompositionLocalProvider(
-                        LocalContentColor provides
+        BoxWithConstraints(Modifier.fillMaxSize().padding(4.dp)) {
+            val halfWidth = (maxWidth - 4.dp) / 2
+            Box(
+                Modifier.width(halfWidth)
+                    .fillMaxHeight()
+                    .graphicsLayer {
+                        translationX = indicatorFraction * (halfWidth.toPx() + 4.dp.toPx())
+                    }
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+            )
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                listOf(false, true).forEach { value ->
+                    val selected = value == lyrics
+                    val contentColor by
+                        animateColorAsState(
                             if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            if (animations) MaterialTheme.motionScheme.fastEffectsSpec() else snap(),
+                            label = "tab tint",
+                        )
+                    Row(
+                        Modifier.weight(1f)
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .selectable(selected, onClick = { onChange(value) }, role = Role.Tab)
+                            .testTag(if (value) "lyrics-tab" else "artwork-tab"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement =
+                            Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                     ) {
-                        Icon(
-                            if (value) Icons.AutoMirrored.Filled.Notes else Icons.Default.Album,
-                            null,
-                            Modifier.size(16.dp),
-                        )
-                        Text(
-                            if (value) strings[R.string.player_screen_lyrics]
-                            else strings[R.string.player_screen_artwork],
-                            style = MaterialTheme.typography.labelMedium,
-                        )
+                        CompositionLocalProvider(LocalContentColor provides contentColor) {
+                            Icon(
+                                if (value) Icons.AutoMirrored.Filled.Notes else Icons.Default.Album,
+                                null,
+                                Modifier.size(16.dp),
+                            )
+                            Text(
+                                if (value) strings[R.string.player_screen_lyrics]
+                                else strings[R.string.player_screen_artwork],
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
             }
@@ -251,32 +274,38 @@ fun FullPlayer(
     val track = tracks.firstOrNull { it.id == state.current?.id } ?: state.current ?: return
     val seed = trackSeed(track, settings.artworkColor)
     val base = MaterialTheme.colorScheme
-    val targetColors =
+    // Keep MaterialTheme colorScheme stable per track (no per-frame recomposition of FullPlayer!)
+    // Backdrop surface & glow animate purely in the draw phase inside AmbientBackdrop.
+    val scheme =
         remember(seed, base, settings.artworkColor) {
             if (settings.artworkColor) coverScheme(seed ?: base.primary, base) else base
         }
-    val primary by
-        animateColorAsState(
-            targetColors.primary,
-            tween(LadMotion.duration(LadMotion.palette, settings.animations)),
-            label = "album primary",
-        )
-    val animatedSeed by
-        animateColorAsState(
-            seed ?: base.primary,
-            tween(LadMotion.duration(LadMotion.palette, settings.animations)),
-            label = "album palette",
-        )
-    val palette = if (settings.artworkColor) coverScheme(animatedSeed, base) else base
-    val onAccent by
-        animateColorAsState(
-            targetColors.onPrimary,
-            tween(LadMotion.duration(LadMotion.palette, settings.animations)),
-            label = "album foreground",
-        )
-    val scheme = palette.copy(primary = primary, onPrimary = onAccent)
+    val targetSeed = seed ?: base.primary
     val background = scheme.surface
     val accent = scheme.primary
+    // Prefetch adjacent queue artwork into Coil memory cache for zero-latency 120Hz transitions
+    val context = LocalContext.current
+    val prefetchEdge =
+        with(LocalDensity.current) { LocalConfiguration.current.screenWidthDp.dp.roundToPx() }
+            .coerceIn(256, 1024)
+    val trackMap = remember(tracks) { tracks.associateBy { it.id } }
+    LaunchedEffect(state.queue.index, state.queue.entries, prefetchEdge) {
+        val loader = context.imageLoader
+        listOf(state.queue.index + 1, state.queue.index - 1)
+            .mapNotNull { idx -> state.queue.entries.getOrNull(idx)?.trackId }
+            .mapNotNull { id -> trackMap[id]?.artwork }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { uri ->
+                loader.enqueue(
+                    ImageRequest.Builder(context)
+                        .data(uri)
+                        .size(prefetchEdge)
+                        .allowHardware(false)
+                        .build()
+                )
+            }
+    }
     var queueOpen by remember { mutableStateOf(false) }
     val audioDialog by vm.audioOpen.collectAsStateWithLifecycle()
     val detailDialog by vm.selectedDetails.collectAsStateWithLifecycle()
@@ -346,32 +375,31 @@ fun FullPlayer(
         if (!closing) {
             closing = true
             scope.launch {
-                reveal.animateTo(
-                    0f,
-                    tween(
-                        LadMotion.duration(LadMotion.quick, settings.animations),
-                        easing = LadMotion.easing,
-                    ),
-                )
+                reveal.animateTo(0f, LadMotion.fastEffects(settings.animations))
                 onClose()
             }
         }
     }
     LaunchedEffect(Unit) {
-        reveal.animateTo(
-            1f,
-            tween(
-                LadMotion.duration(LadMotion.container, settings.animations),
-                easing = LadMotion.easing,
-            ),
-        )
+        reveal.animateTo(1f, LadMotion.defaultSpatial(settings.animations))
     }
+    // M3 Expressive spatial spring shape morph for primary play/pause button
     val playCorner by
         animateDpAsState(
-            if (state.playing) 24.dp else 38.dp,
-            tween(LadMotion.duration(LadMotion.quick, settings.animations)),
+            if (state.playing) 20.dp else 38.dp,
+            LadMotion.fastSpatial(settings.animations),
             label = "play shape",
         )
+    val playInteraction = remember { MutableInteractionSource() }
+    val favScale = remember { Animatable(1f) }
+    LaunchedEffect(track.id, track.favorite) {
+        if (settings.animations && track.favorite) {
+            favScale.snapTo(0.78f)
+            favScale.animateTo(1f, LadMotion.fastSpatial(true))
+        } else {
+            favScale.snapTo(1f)
+        }
+    }
     Dialog(
         onDismissRequest = onClose,
         properties =
@@ -380,6 +408,7 @@ fun FullPlayer(
         val view = LocalView.current
         SideEffect {
             (view.parent as? DialogWindowProvider)?.window?.let { window ->
+                window.preferHighestRefreshRate()
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = background.luminance() > 0.5f
                     isAppearanceLightNavigationBars = background.luminance() > 0.5f
@@ -397,13 +426,13 @@ fun FullPlayer(
             MaterialTheme(colorScheme = scheme) {
                 Surface(
                     Modifier.fillMaxSize().graphicsLayer {
-                        translationY = (1 - reveal.value) * size.height * 0.18f
-                        alpha = reveal.value
+                        translationY = (1f - reveal.value) * size.height * 0.14f
+                        alpha = reveal.value.coerceIn(0f, 1f)
                     },
                     color = background,
                 ) {
                     AmbientBackdrop(
-                        animatedSeed,
+                        targetSeed,
                         artwork = track.artwork,
                         enabled = settings.ambientBackground,
                         animations = settings.animations && state.playing && mediaVisible,
@@ -544,33 +573,14 @@ fun FullPlayer(
                                                 else Modifier.weight(1f)
                                             ),
                                     transitionSpec = {
-                                        (fadeIn(
-                                                tween(
-                                                    LadMotion.duration(
-                                                        LadMotion.standard,
-                                                        settings.animations,
-                                                    )
-                                                )
-                                            ) +
+                                        (fadeIn(LadMotion.defaultEffects(settings.animations)) +
                                                 slideInVertically(
-                                                    tween(
-                                                        LadMotion.duration(
-                                                            LadMotion.standard,
-                                                            settings.animations,
-                                                        )
-                                                    )
+                                                    LadMotion.defaultSpatial(settings.animations)
                                                 ) {
-                                                    it / 24
+                                                    if (targetState) it / 20 else -it / 20
                                                 })
                                             .togetherWith(
-                                                fadeOut(
-                                                    tween(
-                                                        LadMotion.duration(
-                                                            LadMotion.quick,
-                                                            settings.animations,
-                                                        )
-                                                    )
-                                                )
+                                                fadeOut(LadMotion.fastEffects(settings.animations))
                                             )
                                             .using(SizeTransform(clip = true))
                                     },
@@ -669,26 +679,49 @@ fun FullPlayer(
                                     Modifier.fillMaxWidth().padding(top = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            strings.metadata(track.title),
-                                            style = MaterialTheme.typography.headlineLarge,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            strings.metadata(track.artist),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = scheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    AnimatedContent(
+                                        targetState = track.id to (track.title to track.artist),
+                                        modifier = Modifier.weight(1f),
+                                        transitionSpec = {
+                                            (fadeIn(LadMotion.defaultEffects(settings.animations)) +
+                                                    slideInVertically(
+                                                        LadMotion.fastSpatial(settings.animations)
+                                                    ) {
+                                                        it / 5
+                                                    })
+                                                .togetherWith(
+                                                    fadeOut(
+                                                        LadMotion.fastEffects(settings.animations)
+                                                    )
+                                                )
+                                        },
+                                        label = "track meta",
+                                    ) { (_, meta) ->
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Text(
+                                                strings.metadata(meta.first),
+                                                style = MaterialTheme.typography.headlineLarge,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                strings.metadata(meta.second),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = scheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
                                     }
                                     IconButton({ vm.favorite(track) }) {
                                         Icon(
                                             if (track.favorite) Icons.Default.Favorite
                                             else Icons.Default.FavoriteBorder,
                                             strings[R.string.favourites],
+                                            Modifier.graphicsLayer {
+                                                scaleX = favScale.value
+                                                scaleY = favScale.value
+                                            },
                                             tint = accent,
                                         )
                                     }
@@ -696,9 +729,7 @@ fun FullPlayer(
                                 FullPlayerTimeline(track, state, vm)
                                 Surface(
                                     shape = LadShapes.hero,
-                                    color = scheme.surfaceContainerLow.copy(alpha = 0.88f),
-                                    border =
-                                        BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.5f)),
+                                    color = scheme.surfaceContainerLow.copy(alpha = 0.92f),
                                 ) {
                                     Row(
                                         Modifier.fillMaxWidth()
@@ -730,9 +761,12 @@ fun FullPlayer(
                                             )
                                         }
                                         FilledIconButton(
-                                            { vm.playback.toggle() },
-                                            Modifier.size(mainButton),
+                                            onClick = { vm.playback.toggle() },
+                                            modifier =
+                                                Modifier.size(mainButton)
+                                                    .expressivePress(playInteraction, 0.94f),
                                             shape = RoundedCornerShape(playCorner),
+                                            interactionSource = playInteraction,
                                         ) {
                                             if (state.loading)
                                                 CircularProgressIndicator(
@@ -744,12 +778,7 @@ fun FullPlayer(
                                                 Crossfade(
                                                     state.playing,
                                                     animationSpec =
-                                                        tween(
-                                                            LadMotion.duration(
-                                                                LadMotion.quick,
-                                                                settings.animations,
-                                                            )
-                                                        ),
+                                                        LadMotion.fastEffects(settings.animations),
                                                     label = "play state",
                                                 ) { playing ->
                                                     Icon(
@@ -1049,21 +1078,20 @@ internal fun QueueSheet(
             }
             state.queue.entries.getOrNull(state.queue.index)?.let { entry ->
                 lookup[entry.trackId]?.let { current ->
-                    Surface(
-                        Modifier.fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 12.dp)
-                            .testTag("queue-current"),
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        border =
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                    ) {
-                        Row(
-                            Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        Surface(
+                            Modifier.fillMaxWidth()
+                                .padding(top = 16.dp, bottom = 12.dp)
+                                .testTag("queue-current"),
+                            shape = LadShapes.artwork,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         ) {
-                            Artwork(current.artwork, current.title, Modifier.size(56.dp), 16)
+                            Row(
+                                Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Artwork(current.artwork, current.title, Modifier.size(56.dp), 16)
                             Column(
                                 Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -1132,18 +1160,13 @@ internal fun QueueSheet(
                         val index = state.queue.index + n + 1
                         lookup[entry.trackId]?.let { t ->
                             Surface(
-                                shape = RoundedCornerShape(20.dp),
+                                shape = LadShapes.card,
                                 color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                border =
-                                    BorderStroke(
-                                        1.dp,
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                    ),
                             ) {
                                 Row(
                                     Modifier.fillMaxWidth()
                                         .padding(
-                                            start = 12.dp,
+                                            start = 10.dp,
                                             end = 4.dp,
                                             top = 10.dp,
                                             bottom = 10.dp,
@@ -1158,7 +1181,7 @@ internal fun QueueSheet(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
-                                        Artwork(t.artwork, t.title, Modifier.size(46.dp), 14)
+                                        Artwork(t.artwork, t.title, Modifier.size(46.dp), 12)
                                         Column(
                                             Modifier.weight(1f),
                                             verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -1293,7 +1316,7 @@ private fun FullPlayerTimeline(track: Track, state: PlaybackState, vm: LadViewMo
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 duration(if (dragging) seek.toLong() else clock.positionMs),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                 color = scheme.onSurfaceVariant,
             )
             Text(
@@ -1303,7 +1326,7 @@ private fun FullPlayerTimeline(track: Track, state: PlaybackState, vm: LadViewMo
             )
             Text(
                 duration(state.durationMs),
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                 color = scheme.onSurfaceVariant,
             )
         }
@@ -1337,7 +1360,7 @@ private fun MiniTime(state: PlaybackState, palette: ColorScheme, vm: LadViewMode
     val clock = if (vm != null) vm.playback.state.collectAsStateWithLifecycle().value else state
     Text(
         "${duration(clock.positionMs)} · ${duration(clock.durationMs)}",
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
         color = palette.primary,
     )
 }
