@@ -1,186 +1,105 @@
 package dev.lad.ui
 
-import android.Manifest
 import android.app.Application
-import android.content.pm.PackageManager
-import android.database.ContentObserver
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.provider.MediaStore
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.lad.LadApplication
-import dev.lad.data.*
-import dev.lad.domain.FolderRules
-import dev.lad.util.attempt
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import dev.lad.data.Playlist
+import dev.lad.data.Settings
+import dev.lad.data.Track
+import dev.lad.data.TrackEdit
+import dev.lad.ui.state.LibraryStateHolder
+import dev.lad.ui.state.PlayerStateHolder
+import dev.lad.ui.state.PlaylistsStateHolder
+import dev.lad.ui.state.SettingsStateHolder
+import dev.lad.ui.state.StatisticsStateHolder
 
 class LadViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as LadApplication
-    val tracks =
-        combine(
-                app.music.dao.tracks(),
-                app.settings.settings.distinctUntilChanged { old, next ->
-                    old.minimumSeconds == next.minimumSeconds &&
-                        old.includedFolders == next.includedFolders &&
-                        old.excludedFolders == next.excludedFolders
-                },
-            ) { rows, rules ->
-                rows.filter {
-                    it.durationMs >= rules.minimumSeconds * 1000L &&
-                        FolderRules.accepts(
-                            FolderRules.folder(it.path),
-                            rules.includedFolders,
-                            rules.excludedFolders,
-                        )
-                }
-            }
-            .distinctUntilChanged()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val playlists =
-        app.music.dao
-            .playlists()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val history =
-        app.music.dao
-            .listens()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val runs =
-        app.music.dao
-            .runs()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val settings = app.settings.settings.stateIn(viewModelScope, SharingStarted.Eagerly, Settings())
-    val playback = app.playback
-    val folders = MutableStateFlow<List<String>>(emptyList())
-    val lyrics = LyricsRepository(app, app.music.dao)
-    val mediaTools = MediaTools(app)
-    val hidden =
-        app.music.dao
-            .hiddenEdits()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val selectedDetails = MutableStateFlow<Track?>(null)
-    val audioOpen = MutableStateFlow(false)
 
-    fun showDetails(track: Track) {
-        selectedDetails.value = track
-    }
+    val libraryState =
+        LibraryStateHolder(app, app.music, app.settings, app.mediaTools, viewModelScope)
 
-    fun hide(track: Track) {
-        viewModelScope.launch {
-            app.music.edit(
-                track,
-                TrackEdit(
-                    track.id,
-                    track.title,
-                    track.artist,
-                    track.album,
-                    track.year,
-                    track.genre,
-                    track.customArtwork,
-                    true,
-                ),
-            )
-        }
-    }
+    val playerState =
+        PlayerStateHolder(app.playback, app.trackAppearance, app.lyrics, app.settings, viewModelScope)
 
-    fun unhide(id: Long) {
-        viewModelScope.launch {
-            val edit = app.music.dao.edits().firstOrNull { it.trackId == id } ?: return@launch
-            app.music.dao.saveEdit(edit.copy(hidden = false))
-            refresh(false)
-        }
-    }
+    val playlistsState = PlaylistsStateHolder(app.music, viewModelScope)
 
-    suspend fun saveEdit(track: Track, edit: TrackEdit) {
-        app.music.edit(track, edit)
-    }
+    val statisticsState = StatisticsStateHolder(app.music.dao, app.playback, viewModelScope)
 
-    suspend fun saveAlbumCover(albumId: Long, uri: String) {
-        app.music.albumCover(albumId, uri)
-    }
-
-    val scanning = MutableStateFlow(false)
-    val message = MutableStateFlow<String?>(null)
-    private var scanJob: Job? = null
-    private val observer =
-        object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                scheduleScan(false, 800)
-            }
-        }
-
-    init {
-
-        viewModelScope.launch {
-            if (
-                playback.state.value.current != null ||
-                    app.settings.queue.first()?.entries?.isNotEmpty() == true
-            )
-                playback.connect()
-        }
-        app.contentResolver.registerContentObserver(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-            true,
-            observer,
-        )
-    }
-
-    fun hasPermission() =
-        ContextCompat.checkSelfPermission(
+    val settingsState =
+        SettingsStateHolder(
             app,
-            if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
-            else Manifest.permission.READ_EXTERNAL_STORAGE,
-        ) == PackageManager.PERMISSION_GRANTED
+            app.settings,
+            onLibraryRulesChanged = { libraryState.scheduleScan(forceArtwork = false, debounceMs = 100) },
+            scope = viewModelScope,
+        )
 
-    fun refresh(forceArtwork: Boolean = true) = scheduleScan(forceArtwork)
+    val tracks
+        get() = libraryState.tracks
 
-    private fun scheduleScan(forceArtwork: Boolean, debounceMs: Long = 0) {
-        scanJob?.cancel()
-        scanning.value = false
-        scanJob = viewModelScope.launch {
-            delay(debounceMs)
-            if (!hasPermission()) return@launch
-            scanning.value = true
-            try {
-                app.music.scan(app.settings.settings.first(), forceArtwork) {
-                    app.settings.settings.first()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                message.value = error.message
-            } finally {
-                if (scanJob === coroutineContext[Job]) scanning.value = false
-            }
-        }
-    }
+    val playlists
+        get() = playlistsState.playlists
 
-    fun loadFolders() {
-        if (hasPermission())
-            viewModelScope.launch {
-                attempt { app.music.folders() }.onSuccess { folders.value = it }
-            }
-    }
+    val history
+        get() = statisticsState.history
 
-    fun updateSettings(transform: (Settings) -> Settings) {
-        viewModelScope.launch {
-            val previous = app.settings.settings.first()
-            val next = app.settings.update(transform)
-            if (
-                next.includedFolders != previous.includedFolders ||
-                    next.excludedFolders != previous.excludedFolders ||
-                    next.minimumSeconds != previous.minimumSeconds
-            )
-                scheduleScan(false, 100)
-        }
-    }
+    val runs
+        get() = statisticsState.runs
 
-    fun favorite(track: Track) {
-        viewModelScope.launch { app.music.toggleFavorite(track) }
-    }
+    val settings
+        get() = settingsState.settings
+
+    val appearance
+        get() = playerState.appearance
+
+    val playback
+        get() = playerState.playback
+
+    val folders
+        get() = libraryState.folders
+
+    val lyrics
+        get() = playerState.lyrics
+
+    val mediaTools
+        get() = libraryState.mediaTools
+
+    val hidden
+        get() = libraryState.hidden
+
+    val selectedDetails
+        get() = playerState.selectedDetails
+
+    val audioOpen
+        get() = playerState.audioOpen
+
+    val scanning
+        get() = libraryState.scanning
+
+    val message
+        get() = libraryState.message
+
+    fun showDetails(track: Track) = playerState.showDetails(track)
+
+    fun hide(track: Track) = libraryState.hide(track)
+
+    fun unhide(id: Long) = libraryState.unhide(id)
+
+    suspend fun saveEdit(track: Track, edit: TrackEdit) = libraryState.saveEdit(track, edit)
+
+    suspend fun saveAlbumCover(albumId: Long, uri: String) =
+        libraryState.saveAlbumCover(albumId, uri)
+
+    fun hasPermission() = libraryState.hasPermission()
+
+    fun refresh(forceArtwork: Boolean = true) = libraryState.refresh(forceArtwork)
+
+    fun loadFolders() = libraryState.loadFolders()
+
+    fun updateSettings(transform: (Settings) -> Settings) = settingsState.updateSettings(transform)
+
+    fun favorite(track: Track) = libraryState.favorite(track)
 
     fun play(
         track: Track,
@@ -188,33 +107,20 @@ class LadViewModel(application: Application) : AndroidViewModel(application) {
         name: String,
         forceNew: Boolean = false,
         shuffle: Boolean = playback.state.value.queue.shuffle,
-    ) {
-        val state = playback.state.value
-        if (!forceNew && state.current != null) {
-            if (state.current.id == track.id) playback.toggle() else playback.select(track.id)
-        } else playback.start(context.map { it.id }, track.id, shuffle, name)
-    }
+    ) = playerState.play(track, context, name, forceNew, shuffle)
 
-    fun savePlaylist(p: Playlist) {
-        viewModelScope.launch { app.music.dao.savePlaylist(p) }
-    }
+    fun savePlaylist(p: Playlist) = playlistsState.savePlaylist(p)
 
-    fun deletePlaylist(id: Long) {
-        viewModelScope.launch { app.music.dao.deletePlaylist(id) }
-    }
+    fun deletePlaylist(id: Long) = playlistsState.deletePlaylist(id)
 
-    fun addToPlaylist(id: Long, ids: List<Long>) {
-        viewModelScope.launch { app.music.addToPlaylist(id, ids) }
-    }
+    fun addToPlaylist(id: Long, ids: List<Long>) = playlistsState.addToPlaylist(id, ids)
 
-    fun setLanguage(language: String) = dev.lad.i18n.AppLanguage.set(app, language)
+    fun setLanguage(language: String) = settingsState.setLanguage(language)
 
-    fun clearStatistics() {
-        playback.command("clearStats")
-    }
+    fun clearStatistics() = statisticsState.clearStatistics()
 
     override fun onCleared() {
-        app.contentResolver.unregisterContentObserver(observer)
+        libraryState.dispose()
         super.onCleared()
     }
 }

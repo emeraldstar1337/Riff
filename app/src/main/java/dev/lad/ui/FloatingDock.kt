@@ -19,7 +19,6 @@ fun FloatingDock(
     tabs: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
-    onSearch: () -> Unit,
 ) {
     val strings = rememberText()
     val names =
@@ -51,13 +50,15 @@ fun FloatingDock(
             modifier = Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(30.dp)),
         ) {
             tabs.forEach { key ->
+                val icon = icons[key] ?: Icons.Default.Home
+                val label = names[key] ?: key
                 NavigationBarItem(
                     selected = selected == key,
                     onClick = { onSelect(key) },
-                    icon = { Icon(icons.getValue(key), null, Modifier.size(23.dp)) },
+                    icon = { Icon(icon, null, Modifier.size(23.dp)) },
                     label = {
                         Text(
-                            names.getValue(key),
+                            label,
                             maxLines = 1,
                             style = MaterialTheme.typography.labelSmall,
                         )

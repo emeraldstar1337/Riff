@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import androidx.compose.animation.core.*
@@ -64,6 +66,12 @@ fun RankingRow(rank: Ranking, index: Int) {
     }
 }
 
+private data class PersonalRecords(
+    val bestDay: Pair<LocalDate, Long>? = null,
+    val mostPlayed: Pair<String, Int>? = null,
+    val longestRunMs: Long? = null,
+)
+
 @Composable
 fun StatisticsScreen(
     history: List<Listen>,
@@ -72,7 +80,9 @@ fun StatisticsScreen(
     runs: List<PlaybackRun> = emptyList(),
 ) {
     val strings = rememberText()
+    val scope = rememberCoroutineScope()
     val mergeArtists = LocalLadSettings.current.mergeArtists
+    val dateFormat = LocalLadSettings.current.dateFormat
     var period by rememberSaveable { mutableIntStateOf(0) }
     var year by rememberSaveable { mutableIntStateOf(LocalDate.now().year) }
     val stats by
@@ -86,6 +96,28 @@ fun StatisticsScreen(
                     )
                 }
         }
+    val records by
+        produceState(PersonalRecords(), history, runs) {
+            value =
+                withContext(Dispatchers.Default) {
+                    val mostPlayed =
+                        history
+                            .filter { it.counted }
+                            .groupBy { it.trackId }
+                            .values
+                            .maxByOrNull { it.size }
+                            ?.let { it.first().title to it.size }
+                    val zone = ZoneId.systemDefault()
+                    val bestDay =
+                        history
+                            .groupBy { Instant.ofEpochMilli(it.startedAt).atZone(zone).toLocalDate() }
+                            .mapValues { (_, rows) -> rows.sumOf { it.listenedMs } }
+                            .maxByOrNull { it.value }
+                            ?.let { it.key to it.value }
+                    val longestRunMs = runs.maxByOrNull { it.listenedMs }?.listenedMs
+                    PersonalRecords(bestDay, mostPlayed, longestRunMs)
+                }
+        }
     LazyColumn(
         contentPadding = PaddingValues(LadSpacing.page),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -93,10 +125,10 @@ fun StatisticsScreen(
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(Period.entries) { p ->
-                    FilterChip(
-                        selected = period == p.ordinal,
-                        onClick = { period = p.ordinal },
-                        label = { Text(strings.label(p.label)) },
+                    ToggleButton(
+                        checked = period == p.ordinal,
+                        onCheckedChange = { period = p.ordinal },
+                        content = { Text(strings.label(p.label)) },
                     )
                 }
             }
@@ -112,22 +144,26 @@ fun StatisticsScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Metric(
                     "${stats.totalMs/3_600_000}",
-                    strings[R.string.statistics_screens_hours],
+                    strings.plural(R.plurals.statistics_screens_hours, stats.totalMs / 3_600_000),
                     Modifier.weight(1f),
                 )
                 Metric(
                     "${stats.totalMs/60_000}",
-                    strings[R.string.statistics_screens_minutes],
+                    strings.plural(R.plurals.statistics_screens_minutes, stats.totalMs / 60_000),
                     Modifier.weight(1f),
                 )
             }
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Metric("${stats.plays}", strings[R.string.plays], Modifier.weight(1f))
+                Metric(
+                    "${stats.plays}",
+                    strings.plural(R.plurals.plays, stats.plays),
+                    Modifier.weight(1f),
+                )
                 Metric(
                     "${stats.uniqueTracks}",
-                    strings[R.string.different_tracks],
+                    strings.plural(R.plurals.different_tracks, stats.uniqueTracks),
                     Modifier.weight(1f),
                 )
             }
@@ -147,36 +183,27 @@ fun StatisticsScreen(
             )
         }
         item {
-            val mostPlayed =
-                history.filter { it.counted }.groupBy { it.trackId }.values.maxByOrNull { it.size }
-            val days = history.groupBy {
-                java.time.Instant.ofEpochMilli(it.startedAt)
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDate()
-            }
-            val best = days.maxByOrNull { (_, rows) -> rows.sumOf { it.listenedMs } }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 InfoTile(
                     strings[R.string.your_most_musical_day],
-                    best?.let {
+                    records.bestDay?.let { (day, listenedMs) ->
                         strings.format(
                             R.string.statistics_screens_min_478,
-                            it.key,
-                            it.value.sumOf { row -> row.listenedMs } / 60000,
+                            AppDates.format(day, dateFormat),
+                            listenedMs / 60000,
                         )
                     } ?: strings[R.string.more_to_come],
                 )
                 InfoTile(
                     strings[R.string.longest_session],
-                    runs
-                        .maxByOrNull { it.listenedMs }
-                        ?.let { strings.format(R.string.of_music, duration(it.listenedMs)) }
-                        ?: strings[R.string.start_listening_to_set_a_record],
+                    records.longestRunMs?.let {
+                        strings.format(R.string.of_music, duration(it))
+                    } ?: strings[R.string.start_listening_to_set_a_record],
                 )
                 InfoTile(
                     strings[R.string.most_repeated],
-                    mostPlayed?.let {
-                        strings.format(R.string.statistics_screens_plays, it.first().title, it.size)
+                    records.mostPlayed?.let { (title, count) ->
+                        strings.plural(R.plurals.statistics_screens_plays, count, title, count)
                     } ?: strings[R.string.more_to_come],
                 )
             }
@@ -188,7 +215,7 @@ fun StatisticsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(onClick = { year-- }) {
+                IconButton(onClick = { if (year > 1970) year-- }, enabled = year > 1970) {
                     Icon(Icons.Default.ChevronLeft, strings[R.string.previous_year])
                 }
                 Text(year.toString(), style = MaterialTheme.typography.titleLarge)
@@ -203,15 +230,18 @@ fun StatisticsScreen(
         item {
             Card(
                 onClick = {
-                    onRecap(
-                        RecapGenerator.aggregate(
-                            history,
-                            RecapGenerator.year(year),
-                            mergeArtists = mergeArtists,
-                        ),
-                        strings.format(R.string.your, year),
-                        true,
-                    )
+                    val selectedYear = year
+                    scope.launch {
+                        val aggregated =
+                            withContext(Dispatchers.Default) {
+                                RecapGenerator.aggregate(
+                                    history,
+                                    RecapGenerator.year(selectedYear),
+                                    mergeArtists = mergeArtists,
+                                )
+                            }
+                        onRecap(aggregated, strings.format(R.string.your, selectedYear), true)
+                    }
                 },
                 shape = LadShapes.hero,
                 colors =
@@ -241,15 +271,22 @@ fun StatisticsScreen(
                 Season.entries.forEach { s ->
                     FilledTonalButton(
                         onClick = {
-                            val w = RecapGenerator.season(s, year)
-                            onRecap(
-                                RecapGenerator.aggregate(history, w, mergeArtists = mergeArtists),
-                                "${strings.label(s.label)} $year",
-                                false,
-                            )
+                            val selectedYear = year
+                            scope.launch {
+                                val aggregated =
+                                    withContext(Dispatchers.Default) {
+                                        RecapGenerator.aggregate(
+                                            history,
+                                            RecapGenerator.season(s, selectedYear),
+                                            mergeArtists = mergeArtists,
+                                        )
+                                    }
+                                onRecap(aggregated, "${strings.label(s.label)} $selectedYear", false)
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 2.dp, vertical = 14.dp),
+                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                     ) {
                         Text(strings.label(s.label), style = MaterialTheme.typography.labelSmall)
                     }
@@ -260,24 +297,27 @@ fun StatisticsScreen(
             TextButton(
                 onClick = {
                     onRecap(RecapGenerator.demo(tracks), strings[R.string.demo_your_year], true)
-                }
+                },
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.preview_a_demo_recap])
             }
         }
         if (stats.tracks.isNotEmpty()) {
             item { SectionTitle(strings[R.string.favourite_tracks]) }
-            itemsIndexed(stats.tracks.take(5), key = { _, r -> "t${r.name}" }) { i, r ->
+            itemsIndexed(stats.tracks.take(5), key = { i, r -> "t:${r.trackId ?: r.name}:$i" }) {
+                i,
+                r ->
                 RankingRow(r, i)
             }
             item { SectionTitle(strings[R.string.statistics_screens_artists]) }
-            itemsIndexed(stats.artists.take(5), key = { _, r -> "a${r.name}" }) { i, r ->
+            itemsIndexed(stats.artists.take(5), key = { i, r -> "a:${r.name}:$i" }) { i, r ->
                 RankingRow(r, i)
             }
             item {
                 SectionTitle(strings[R.string.most_played_album], stats.albums.firstOrNull()?.name)
             }
-            itemsIndexed(stats.albums.take(5), key = { _, r -> "album${r.name}" }) { i, r ->
+            itemsIndexed(stats.albums.take(5), key = { i, r -> "album:${r.name}:$i" }) { i, r ->
                 RankingRow(r, i)
             }
             item {
@@ -310,11 +350,13 @@ fun StatisticsScreen(
                 )
             }
             item {
+                val bestMinutes = (stats.days[stats.bestDay] ?: 0) / 60_000
                 Text(
-                    strings.format(
-                        R.string.your_most_musical_day_minutes,
-                        stats.bestDay,
-                        (stats.days[stats.bestDay] ?: 0) / 60_000,
+                    strings.plural(
+                        R.plurals.your_most_musical_day_minutes,
+                        bestMinutes,
+                        stats.bestDay?.let { AppDates.format(it, dateFormat) },
+                        bestMinutes,
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -463,6 +505,7 @@ fun RecapScreen(
                                 }
                             },
                             enabled = pager.currentPage > 0,
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                         ) {
                             Text(strings[R.string.back])
                         }
@@ -489,6 +532,7 @@ fun RecapScreen(
                                     }
                             },
                             contentPadding = PaddingValues(24.dp, 16.dp),
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                         ) {
                             Text(
                                 if (pager.currentPage == slides.lastIndex) strings[R.string.done]

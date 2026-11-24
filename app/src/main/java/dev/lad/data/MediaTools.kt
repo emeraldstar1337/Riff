@@ -52,16 +52,21 @@ class MediaTools(private val context: Context) {
                 }
             val m = MediaMetadataRetriever()
             try {
-                m.setDataSource(context, uri)
-                fun value(key: Int) = m.extractMetadata(key) ?: ""
-                var sampleRate =
-                    if (android.os.Build.VERSION.SDK_INT >= 31)
-                        value(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
-                    else ""
-                var bits =
-                    if (android.os.Build.VERSION.SDK_INT >= 31)
-                        value(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
-                    else ""
+                var bitrate = 0
+                var sampleRate = ""
+                var bits = ""
+                var mime = track.mimeType
+                attempt {
+                    m.setDataSource(context, uri)
+                    fun value(key: Int) = m.extractMetadata(key) ?: ""
+                    bitrate = value(MediaMetadataRetriever.METADATA_KEY_BITRATE).toIntOrNull() ?: 0
+                    if (android.os.Build.VERSION.SDK_INT >= 31) {
+                        sampleRate = value(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+                        bits = value(MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
+                    }
+                    value(MediaMetadataRetriever.METADATA_KEY_MIMETYPE).takeIf { it.isNotBlank() }
+                        ?.let { mime = it }
+                }
                 var channels = ""
                 val extractor = android.media.MediaExtractor()
                 try {
@@ -87,19 +92,11 @@ class MediaTools(private val context: Context) {
                         break
                     }
                 } catch (_: Exception) {} finally {
-                    extractor.release()
+                    runCatching { extractor.release() }
                 }
-                FileDetails(
-                    name,
-                    size,
-                    value(MediaMetadataRetriever.METADATA_KEY_BITRATE).toIntOrNull() ?: 0,
-                    sampleRate,
-                    bits,
-                    channels,
-                    value(MediaMetadataRetriever.METADATA_KEY_MIMETYPE),
-                )
+                FileDetails(name, size, bitrate, sampleRate, bits, channels, mime)
             } finally {
-                m.release()
+                runCatching { m.release() }
             }
         }
 
@@ -114,20 +111,24 @@ class MediaTools(private val context: Context) {
             val hashes = mutableMapOf<String, MutableList<Track>>()
             candidates.forEachIndexed { i, t ->
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                val hash = attempt {
-                    val digest = MessageDigest.getInstance("SHA-256")
-                    context.contentResolver.openInputStream(t.uri.toUri())!!.use { stream ->
-                        val bytes = ByteArray(65536)
-                        while (true) {
-                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                            val n = stream.read(bytes)
-                            if (n < 0) break
-                            digest.update(bytes, 0, n)
+                val hash =
+                    attempt {
+                            val digest = MessageDigest.getInstance("SHA-256")
+                            val stream =
+                                context.contentResolver.openInputStream(t.uri.toUri())
+                                    ?: return@attempt null
+                            stream.use { input ->
+                                val bytes = ByteArray(65536)
+                                while (true) {
+                                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                    val n = input.read(bytes)
+                                    if (n < 0) break
+                                    digest.update(bytes, 0, n)
+                                }
+                            }
+                            digest.digest().joinToString("") { "%02x".format(it) }
                         }
-                    }
-                    digest.digest().joinToString("") { "%02x".format(it) }
-                }
-                    .getOrNull()
+                        .getOrNull()
                 if (hash != null) hashes.getOrPut(hash) { mutableListOf() }.add(t)
                 onProgress(i + 1, candidates.size)
             }
@@ -145,9 +146,10 @@ class MediaTools(private val context: Context) {
             require(extension != "opus") { strings[R.string.writing_opus_tags_is_not_supported] }
             val temporary = File.createTempFile("lad-tags-", ".$extension", context.cacheDir)
             try {
-                context.contentResolver.openInputStream(track.uri.toUri())!!.use { source ->
-                    temporary.outputStream().use { source.copyTo(it) }
-                }
+                val sourceStream =
+                    context.contentResolver.openInputStream(track.uri.toUri())
+                        ?: error(strings[R.string.track_unavailable])
+                sourceStream.use { source -> temporary.outputStream().use { source.copyTo(it) } }
                 val audio = AudioFileIO.read(temporary)
                 val tag = audio.tagOrCreateAndSetDefault
                 listOf(
@@ -162,9 +164,12 @@ class MediaTools(private val context: Context) {
                     }
                 track.customArtwork?.let { cover ->
                     val bytes =
-                        context.contentResolver.openInputStream(cover.toUri())?.use {
-                            it.readBytes()
-                        }
+                        attempt {
+                                context.contentResolver.openInputStream(cover.toUri())?.use {
+                                    readBounded(it, 20 * 1024 * 1024)
+                                }
+                            }
+                            .getOrNull()
                     if (bytes != null) {
                         val art = org.jaudiotagger.tag.images.StandardArtwork()
                         val bounds =
@@ -185,16 +190,29 @@ class MediaTools(private val context: Context) {
                 (tag as? org.jaudiotagger.tag.wav.WavTag)?.syncTagBeforeWrite()
                 audio.commit()
                 val checkedTag = AudioFileIO.read(temporary).tag
-                check(checkedTag.getFirst(FieldKey.TITLE) == track.title) {
+                check(checkedTag?.getFirst(FieldKey.TITLE) == track.title) {
                     strings[R.string.could_not_verify_the_saved_tags]
                 }
-                context.contentResolver.openOutputStream(destination, "wt")!!.use { out ->
-                    temporary.inputStream().use { it.copyTo(out) }
-                }
+                val destStream =
+                    context.contentResolver.openOutputStream(destination, "wt")
+                        ?: error(strings[R.string.save_failed])
+                destStream.use { out -> temporary.inputStream().use { it.copyTo(out) } }
             } finally {
                 temporary.delete()
             }
         }
+
+    private fun readBounded(stream: java.io.InputStream, maxBytes: Int): ByteArray? {
+        val output = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(16384)
+        while (true) {
+            val n = stream.read(buffer)
+            if (n < 0) break
+            if (output.size() + n > maxBytes) return null
+            output.write(buffer, 0, n)
+        }
+        return output.toByteArray()
+    }
 }
 
 private object TagConfiguration {

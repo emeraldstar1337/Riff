@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package dev.lad.ui
 
@@ -47,11 +50,22 @@ fun NameDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { onSave(name.trim()) }, enabled = name.isNotBlank()) {
+            TextButton(
+                onClick = { onSave(name.trim()) },
+                enabled = name.isNotBlank(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
                 Text(strings[R.string.save])
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(strings[R.string.cancel]) } },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
+                Text(strings[R.string.cancel])
+            }
+        },
     )
 }
 
@@ -81,7 +95,7 @@ fun AddPlaylistDialog(
                         ListItem(
                             headlineContent = { Text(p.name) },
                             supportingContent = {
-                                Text(strings.format(R.string.tracks, p.tracks.size))
+                                Text(strings.plural(R.plurals.tracks, p.tracks.size, p.tracks.size))
                             },
                             modifier = Modifier.clickable { onAdd(p.id) },
                         )
@@ -89,11 +103,21 @@ fun AddPlaylistDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { creating = true }) {
+                TextButton(
+                    onClick = { creating = true },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
                     Text(strings[R.string.create_playlist])
                 }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text(strings[R.string.close]) } },
+            dismissButton = {
+                TextButton(
+                    onClick = onDismiss,
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.close])
+                }
+            },
         )
 }
 
@@ -116,6 +140,7 @@ fun PlaylistsScreen(
                 onClick = { create = true },
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(18.dp),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Icon(Icons.Default.Add, null)
                 Spacer(Modifier.width(8.dp))
@@ -148,7 +173,7 @@ fun PlaylistsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            strings.format(R.string.tracks, p.tracks.size),
+                            strings.plural(R.plurals.tracks, p.tracks.size, p.tracks.size),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -181,12 +206,14 @@ fun PlaylistScreen(
     var rename by remember { mutableStateOf(false) }
     var delete by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
-    var localOrder by remember(p.id, p.tracks) { mutableStateOf(p.tracks) }
+    var localOrder by remember(p.id, p.tracks) { mutableStateOf(p.tracks.distinct()) }
     var dragId by remember { mutableStateOf<Long?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
+    val latestPlaylist by rememberUpdatedState(p)
     val rowHeight = with(LocalDensity.current) { 78.dp.toPx() }
     val lookup = remember(tracks) { tracks.associateBy { it.id } }
-    val available = localOrder.mapNotNull { lookup[it] }
+    val latestLookup by rememberUpdatedState(lookup)
+    val available = remember(localOrder, lookup) { localOrder.mapNotNull { lookup[it] } }
     val cover =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -218,8 +245,9 @@ fun PlaylistScreen(
                     fontWeight = FontWeight.Black,
                 )
                 Text(
-                    strings.format(
-                        R.string.playlist_screens_tracks,
+                    strings.plural(
+                        R.plurals.playlist_screens_tracks,
+                        available.size,
                         available.size,
                         duration(available.sumOf { it.durationMs }),
                     ),
@@ -233,6 +261,7 @@ fun PlaylistScreen(
                             }
                         },
                         enabled = available.isNotEmpty(),
+                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                     ) {
                         Icon(Icons.Default.PlayArrow, null)
                         Text(strings[R.string.listen])
@@ -275,14 +304,13 @@ fun PlaylistScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (localOrder.size > available.size)
+                if (localOrder.size > available.size) {
+                    val missing = localOrder.size - available.size
                     Text(
-                        strings.format(
-                            R.string.unavailable_files,
-                            localOrder.size - available.size,
-                        ),
+                        strings.plural(R.plurals.unavailable_files, missing, missing),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                }
             }
         }
         if (available.isEmpty())
@@ -326,11 +354,11 @@ fun PlaylistScreen(
                                     },
                                     onDragEnd = {
                                         dragId = null
-                                        vm.savePlaylist(p.copy(tracks = localOrder))
+                                        vm.savePlaylist(latestPlaylist.copy(tracks = localOrder))
                                     },
                                     onDragCancel = {
                                         dragId = null
-                                        vm.savePlaylist(p.copy(tracks = localOrder))
+                                        vm.savePlaylist(latestPlaylist.copy(tracks = localOrder))
                                     },
                                     onDrag = { change, amount ->
                                         change.consume()
@@ -339,13 +367,22 @@ fun PlaylistScreen(
                                             if (dragOffset > rowHeight) 1
                                             else if (dragOffset < -rowHeight) -1 else 0
                                         if (direction != 0) {
-                                            val from = localOrder.indexOf(dragId)
-                                            val to = from + direction
-                                            if (from >= 0 && to in localOrder.indices) {
-                                                val next = localOrder.toMutableList()
-                                                next.add(to, next.removeAt(from))
-                                                localOrder = next
-                                                dragOffset -= direction * rowHeight
+                                            val activeId = dragId
+                                            val from = localOrder.indexOf(activeId)
+                                            if (from >= 0) {
+                                                var to = from + direction
+                                                while (
+                                                    to in localOrder.indices &&
+                                                        localOrder[to] !in latestLookup
+                                                ) {
+                                                    to += direction
+                                                }
+                                                if (to in localOrder.indices) {
+                                                    val next = localOrder.toMutableList()
+                                                    next.add(to, next.removeAt(from))
+                                                    localOrder = next
+                                                    dragOffset -= direction * rowHeight
+                                                }
                                             }
                                         }
                                     },
@@ -378,13 +415,19 @@ fun PlaylistScreen(
                         vm.deletePlaylist(p.id)
                         delete = false
                         onDeleted()
-                    }
+                    },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.delete])
                 }
             },
             dismissButton = {
-                TextButton(onClick = { delete = false }) { Text(strings[R.string.cancel]) }
+                TextButton(
+                    onClick = { delete = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.cancel])
+                }
             },
         )
     if (picking)
@@ -409,6 +452,14 @@ fun PickTracksDialog(
     val strings = rememberText()
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     var query by remember { mutableStateOf("") }
+    val existingIds = remember(existing) { existing.toHashSet() }
+    val filtered =
+        remember(tracks, existingIds, query) {
+            tracks.filter {
+                it.id !in existingIds &&
+                    (it.title.contains(query, true) || it.artist.contains(query, true))
+            }
+        }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings[R.string.choose_tracks]) },
@@ -421,13 +472,7 @@ fun PickTracksDialog(
                     singleLine = true,
                 )
                 LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                    items(
-                        tracks.filter {
-                            it.id !in existing &&
-                                (it.title.contains(query, true) || it.artist.contains(query, true))
-                        },
-                        key = { it.id },
-                    ) { t ->
+                    items(filtered, key = { it.id }) { t ->
                         Row(
                             Modifier.fillMaxWidth().clickable {
                                 selected =
@@ -452,10 +497,21 @@ fun PickTracksDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(selected.toList()) }, enabled = selected.isNotEmpty()) {
+            TextButton(
+                onClick = { onSave(selected.toList()) },
+                enabled = selected.isNotEmpty(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
                 Text(strings.format(R.string.playlist_screens_add, selected.size))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(strings[R.string.cancel]) } },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
+                Text(strings[R.string.cancel])
+            }
+        },
     )
 }

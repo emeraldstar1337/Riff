@@ -47,7 +47,7 @@ object AppearancePresets {
         listOf(
             LyricsPreset("balanced", "Balanced", 24f, 1.3f, "start", 0.46f),
             LyricsPreset("stage", "Stage", 30f, 1.45f, "center", 0.28f),
-            LyricsPreset("reading", "Reading", 20f, 1.5f, "start", 0.65f),
+            LyricsPreset("reading", "Reading", 20f, 1.5f, "start", 0.6f),
             LyricsPreset("compact", "Compact", 18f, 1.2f, "start", 0.5f),
         )
 }

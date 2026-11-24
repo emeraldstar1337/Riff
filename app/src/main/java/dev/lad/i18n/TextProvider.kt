@@ -1,7 +1,13 @@
 package dev.lad.i18n
 
-fun interface TextProvider {
-    fun format(id: Int, vararg arguments: Any?): String
+import androidx.annotation.PluralsRes
+import androidx.annotation.StringRes
 
-    operator fun get(id: Int): String = format(id)
+fun interface TextProvider {
+    fun format(@StringRes id: Int, vararg arguments: Any?): String
+
+    fun plural(@PluralsRes id: Int, quantity: Number, vararg arguments: Any?): String =
+        format(id, quantity, *arguments)
+
+    operator fun get(@StringRes id: Int): String = format(id)
 }

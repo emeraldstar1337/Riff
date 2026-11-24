@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package dev.lad.ui
 
@@ -59,9 +62,9 @@ fun MiniPlayer(
     val strings = rememberText()
     val track = state.current ?: return
     val settings = LocalLadSettings.current
-    val seed = artworkSeed(track.artwork, settings.artworkColor)
-    val palette =
-        seed?.let { coverScheme(it, MaterialTheme.colorScheme) } ?: MaterialTheme.colorScheme
+    val seed = trackSeed(track, settings.artworkColor)
+    val base = MaterialTheme.colorScheme
+    val palette = remember(seed, base) { seed?.let { coverScheme(it, base) } ?: base }
     val slim = settings.miniStyle == "slim"
     Surface(
         Modifier.fillMaxWidth()
@@ -211,8 +214,7 @@ internal fun PlayerTabs(lyrics: Boolean, onChange: (Boolean) -> Unit) {
                         .selectable(selected, onClick = { onChange(value) }, role = Role.Tab)
                         .testTag(if (value) "lyrics-tab" else "artwork-tab"),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement =
-                        Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 ) {
                     CompositionLocalProvider(
                         LocalContentColor provides
@@ -245,30 +247,52 @@ fun FullPlayer(
     onClose: () -> Unit,
 ) {
     val strings = rememberText()
+    LaunchedEffect(state.current) { if (state.current == null) onClose() }
     val track = tracks.firstOrNull { it.id == state.current?.id } ?: state.current ?: return
-    val seed = artworkSeed(track.artwork, settings.artworkColor)
+    val seed = trackSeed(track, settings.artworkColor)
     val base = MaterialTheme.colorScheme
-    val target = seed?.let { coverScheme(it, base) } ?: base
-    val background by
+    val targetColors =
+        remember(seed, base, settings.artworkColor) {
+            if (settings.artworkColor) coverScheme(seed ?: base.primary, base) else base
+        }
+    val primary by
         animateColorAsState(
-            target.surface,
+            targetColors.primary,
             tween(LadMotion.duration(LadMotion.palette, settings.animations)),
-            label = "album surface",
+            label = "album primary",
         )
-    val accent by
+    val animatedSeed by
         animateColorAsState(
-            target.primary,
+            seed ?: base.primary,
             tween(LadMotion.duration(LadMotion.palette, settings.animations)),
-            label = "album accent",
+            label = "album palette",
         )
-    val scheme = target.copy(surface = background, primary = accent)
+    val palette = if (settings.artworkColor) coverScheme(animatedSeed, base) else base
+    val onAccent by
+        animateColorAsState(
+            targetColors.onPrimary,
+            tween(LadMotion.duration(LadMotion.palette, settings.animations)),
+            label = "album foreground",
+        )
+    val scheme = palette.copy(primary = primary, onPrimary = onAccent)
+    val background = scheme.surface
+    val accent = scheme.primary
     var queueOpen by remember { mutableStateOf(false) }
     val audioDialog by vm.audioOpen.collectAsStateWithLifecycle()
     val detailDialog by vm.selectedDetails.collectAsStateWithLifecycle()
     var lyricsTab by rememberSaveable { mutableStateOf(false) }
     var sleepOpen by remember { mutableStateOf(false) }
     var options by remember { mutableStateOf(false) }
-    val mediaVisible = !queueOpen && !audioDialog && detailDialog == null && !options && !sleepOpen
+    var accentPicker by remember { mutableStateOf<Track?>(null) }
+    var shareCard by remember { mutableStateOf<Track?>(null) }
+    val mediaVisible =
+        !queueOpen &&
+            !audioDialog &&
+            detailDialog == null &&
+            !options &&
+            !sleepOpen &&
+            accentPicker == null &&
+            shareCard == null
     val owner = LocalLifecycleOwner.current
     var lifecycle by remember(owner) { mutableStateOf(owner.lifecycle.currentState) }
     DisposableEffect(owner) {
@@ -280,6 +304,7 @@ fun FullPlayer(
     LaunchedEffect(
         settings.vinyl,
         settings.animations,
+        mediaVisible,
         state.playing,
         lyricsTab,
         queueOpen,
@@ -359,8 +384,12 @@ fun FullPlayer(
                     isAppearanceLightStatusBars = background.luminance() > 0.5f
                     isAppearanceLightNavigationBars = background.luminance() > 0.5f
                 }
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                if (android.os.Build.VERSION.SDK_INT < 35) {
+                    @Suppress("DEPRECATION")
+                    window.statusBarColor = android.graphics.Color.TRANSPARENT
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                }
                 window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             }
         }
@@ -374,7 +403,7 @@ fun FullPlayer(
                     color = background,
                 ) {
                     AmbientBackdrop(
-                        seed ?: accent,
+                        animatedSeed,
                         artwork = track.artwork,
                         enabled = settings.ambientBackground,
                         animations = settings.animations && state.playing && mediaVisible,
@@ -454,6 +483,22 @@ fun FullPlayer(
                                                 strings[R.string.current_track_controls],
                                                 { options = false },
                                                 listOf(
+                                                    PlayerAction(
+                                                        strings[R.string.album_accent],
+                                                        strings[R.string.pick_cover_pixel],
+                                                        Icons.Default.Colorize,
+                                                    ) {
+                                                        options = false
+                                                        accentPicker = track
+                                                    },
+                                                    PlayerAction(
+                                                        strings[R.string.share_card],
+                                                        strings[R.string.share_card_hint],
+                                                        Icons.Default.Share,
+                                                    ) {
+                                                        options = false
+                                                        shareCard = track
+                                                    },
                                                     PlayerAction(
                                                         strings[
                                                             R.string.track_information_and_tags],
@@ -589,16 +634,9 @@ fun FullPlayer(
                                                         )
                                                     }
                                             ) {
-                                                Crossfade(
+                                                ArtworkMotion(
                                                     track.artwork,
-                                                    animationSpec =
-                                                        tween(
-                                                            LadMotion.duration(
-                                                                LadMotion.expressive,
-                                                                settings.animations,
-                                                            )
-                                                        ),
-                                                    label = "player cover",
+                                                    direction = state.artworkDirection,
                                                 ) { uri ->
                                                     Box(
                                                         Modifier.fillMaxSize().graphicsLayer {
@@ -660,10 +698,7 @@ fun FullPlayer(
                                     shape = LadShapes.hero,
                                     color = scheme.surfaceContainerLow.copy(alpha = 0.88f),
                                     border =
-                                        BorderStroke(
-                                            1.dp,
-                                            scheme.outlineVariant.copy(alpha = 0.5f),
-                                        ),
+                                        BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.5f)),
                                 ) {
                                     Row(
                                         Modifier.fillMaxWidth()
@@ -767,7 +802,7 @@ fun FullPlayer(
                                         if (!compactFooter)
                                             IconButton({
                                                 vm.playback.seek(
-                                                    (vm.playback.state.value.positionMs - 10000)
+                                                    (livePositionMs(vm.playback.state.value) - 10000)
                                                         .coerceAtLeast(0)
                                                 )
                                             }) {
@@ -778,11 +813,18 @@ fun FullPlayer(
                                             }
                                         TextButton(
                                             { vm.audioOpen.value = true },
-                                            Modifier.weight(1f),
+                                            modifier = Modifier.weight(1f),
+                                            shapes =
+                                                androidx.compose.material3.ButtonDefaults.shapes(),
                                         ) {
                                             Text(strings[R.string.sound])
                                         }
-                                        TextButton({ queueOpen = true }, Modifier.weight(1f)) {
+                                        TextButton(
+                                            { queueOpen = true },
+                                            modifier = Modifier.weight(1f),
+                                            shapes =
+                                                androidx.compose.material3.ButtonDefaults.shapes(),
+                                        ) {
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
@@ -795,9 +837,12 @@ fun FullPlayer(
                                         }
                                         if (!compactFooter)
                                             IconButton({
+                                                val maxMs =
+                                                    state.durationMs.takeIf { it > 0 }
+                                                        ?: Long.MAX_VALUE
                                                 vm.playback.seek(
-                                                    (vm.playback.state.value.positionMs + 10000)
-                                                        .coerceAtMost(state.durationMs)
+                                                    (livePositionMs(vm.playback.state.value) + 10000)
+                                                        .coerceAtMost(maxMs)
                                                 )
                                             }) {
                                                 Icon(
@@ -813,7 +858,7 @@ fun FullPlayer(
                                         ) {
                                             IconButton({
                                                 vm.playback.seek(
-                                                    (vm.playback.state.value.positionMs - 10000)
+                                                    (livePositionMs(vm.playback.state.value) - 10000)
                                                         .coerceAtLeast(0)
                                                 )
                                             }) {
@@ -823,9 +868,12 @@ fun FullPlayer(
                                                 )
                                             }
                                             IconButton({
+                                                val maxMs =
+                                                    state.durationMs.takeIf { it > 0 }
+                                                        ?: Long.MAX_VALUE
                                                 vm.playback.seek(
-                                                    (vm.playback.state.value.positionMs + 10000)
-                                                        .coerceAtMost(state.durationMs)
+                                                    (livePositionMs(vm.playback.state.value) + 10000)
+                                                        .coerceAtMost(maxMs)
                                                 )
                                             }) {
                                                 Icon(
@@ -849,16 +897,21 @@ fun FullPlayer(
                         vm.playback::move,
                         vm.playback::remove,
                         vm.playback::restoreQueue,
+                        onJump = vm.playback::jump,
                     ) {
                         queueOpen = false
                     }
-                val details by vm.selectedDetails.collectAsStateWithLifecycle()
-                val audio by vm.audioOpen.collectAsStateWithLifecycle()
-                val history by vm.history.collectAsStateWithLifecycle()
-                details?.let {
-                    TrackDetailsPanel(it, history, vm) { vm.selectedDetails.value = null }
+                detailDialog?.let {
+                    val detailHistory by vm.statisticsState.history.collectAsStateWithLifecycle()
+                    TrackDetailsPanel(it, detailHistory, vm) { vm.selectedDetails.value = null }
                 }
-                if (audio) AudioPanel(settings, state, vm) { vm.audioOpen.value = false }
+                accentPicker?.let { selected ->
+                    AlbumAccentPicker(selected, vm) { accentPicker = null }
+                }
+                shareCard?.let { selected ->
+                    MusicSharePanel(selected, vm = vm) { shareCard = null }
+                }
+                if (audioDialog) AudioPanel(settings, state, vm) { vm.audioOpen.value = false }
                 if (sleepOpen)
                     AlertDialog(
                         onDismissRequest = { sleepOpen = false },
@@ -866,25 +919,36 @@ fun FullPlayer(
                         text = {
                             Column {
                                 listOf(15, 30, 45, 60, 90).forEach { n ->
-                                    TextButton({
-                                        vm.playback.sleep(n)
-                                        sleepOpen = false
-                                    }) {
-                                        Text(strings.format(R.string.minutes, n))
+                                    TextButton(
+                                        {
+                                            vm.playback.sleep(n)
+                                            sleepOpen = false
+                                        },
+                                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                                    ) {
+                                        Text(strings.plural(R.plurals.minutes, n, n))
                                     }
                                 }
                             }
                         },
                         confirmButton = {
-                            TextButton({
-                                vm.playback.sleep(0)
-                                sleepOpen = false
-                            }) {
+                            TextButton(
+                                {
+                                    vm.playback.sleep(0)
+                                    sleepOpen = false
+                                },
+                                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                            ) {
                                 Text(strings[R.string.turn_off])
                             }
                         },
                         dismissButton = {
-                            TextButton({ sleepOpen = false }) { Text(strings[R.string.close]) }
+                            TextButton(
+                                { sleepOpen = false },
+                                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                            ) {
+                                Text(strings[R.string.close])
+                            }
                         },
                     )
             }
@@ -900,6 +964,7 @@ internal fun QueueSheet(
     onMove: (Int, Int) -> Unit,
     onRemove: (Int) -> Unit,
     onRestore: (Long) -> Unit = {},
+    onJump: ((Int) -> Unit)? = null,
     onClose: () -> Unit,
 ) {
     val strings = rememberText()
@@ -913,20 +978,29 @@ internal fun QueueSheet(
             text = {
                 LazyColumn(Modifier.heightIn(max = 440.dp)) {
                     items(state.queueHistory.asReversed(), key = { it.id }) { revision ->
-                        TextButton({
-                            onRestore(revision.id)
-                            historyOpen = false
-                        }) {
+                        TextButton(
+                            {
+                                onRestore(revision.id)
+                                historyOpen = false
+                            },
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                        ) {
                             Column(Modifier.fillMaxWidth()) {
                                 Text(strings.label(revision.label))
                                 Text(
-                                    strings.format(
-                                        R.string.library_screens_tracks_205,
+                                    strings.plural(
+                                        R.plurals.library_screens_tracks_205,
                                         revision.snapshot.entries.size,
-                                        java.text.DateFormat.getTimeInstance(
-                                                java.text.DateFormat.SHORT
-                                            )
-                                            .format(java.util.Date(revision.createdAt)),
+                                        revision.snapshot.entries.size,
+                                        AppDates.format(
+                                            revision.createdAt,
+                                            LocalLadSettings.current.dateFormat,
+                                        ) +
+                                            " · " +
+                                            java.text.DateFormat.getTimeInstance(
+                                                    java.text.DateFormat.SHORT
+                                                )
+                                                .format(java.util.Date(revision.createdAt)),
                                     ),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
@@ -936,7 +1010,12 @@ internal fun QueueSheet(
                 }
             },
             confirmButton = {
-                TextButton({ historyOpen = false }) { Text(strings[R.string.close]) }
+                TextButton(
+                    { historyOpen = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.close])
+                }
             },
         )
     PlayerSheet(
@@ -954,11 +1033,16 @@ internal fun QueueSheet(
                 TextButton(
                     { state.queueHistory.lastOrNull()?.let { onRestore(it.id) } },
                     enabled = state.queueHistory.isNotEmpty(),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Undo, null, Modifier.size(18.dp))
                     Text(strings[R.string.undo])
                 }
-                TextButton({ historyOpen = true }, enabled = state.queueHistory.isNotEmpty()) {
+                TextButton(
+                    { historyOpen = true },
+                    enabled = state.queueHistory.isNotEmpty(),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
                     Icon(Icons.Default.History, null, Modifier.size(18.dp))
                     Text(strings[R.string.player_screen_history])
                 }
@@ -972,10 +1056,7 @@ internal fun QueueSheet(
                         shape = RoundedCornerShape(24.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
                         border =
-                            BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                            ),
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
                     ) {
                         Row(
                             Modifier.padding(14.dp),
@@ -1071,7 +1152,9 @@ internal fun QueueSheet(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
                                     Row(
-                                        Modifier.weight(1f).clickable { onSelect(t.id) },
+                                        Modifier.weight(1f).clickable {
+                                            if (onJump != null) onJump(index) else onSelect(t.id)
+                                        },
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
@@ -1109,48 +1192,54 @@ internal fun QueueSheet(
                                                 strings.format(R.string.queue_actions, t.title),
                                             )
                                         }
-                                        DropdownMenu(menu, { menu = false }) {
-                                            if (
-                                                index > state.queue.index + 1 &&
-                                                    state.queue.entries[index - 1].cycle ==
-                                                        entry.cycle
-                                            )
-                                                DropdownMenuItem(
-                                                    text = { Text(strings[R.string.move_up]) },
-                                                    leadingIcon = {
-                                                        Icon(Icons.Default.KeyboardArrowUp, null)
-                                                    },
-                                                    onClick = {
-                                                        menu = false
-                                                        onMove(index, index - 1)
-                                                    },
-                                                )
-                                            if (
-                                                index < state.queue.entries.lastIndex &&
-                                                    state.queue.entries[index + 1].cycle ==
-                                                        entry.cycle
-                                            )
-                                                DropdownMenuItem(
-                                                    text = { Text(strings[R.string.move_down]) },
-                                                    leadingIcon = {
-                                                        Icon(Icons.Default.KeyboardArrowDown, null)
-                                                    },
-                                                    onClick = {
-                                                        menu = false
-                                                        onMove(index, index + 1)
-                                                    },
-                                                )
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(strings[R.string.remove_from_queue])
+                                        if (menu)
+                                            ExpressiveActions(
+                                                t.title,
+                                                strings.metadata(t.artist),
+                                                { menu = false },
+                                                buildList {
+                                                    if (
+                                                        index > state.queue.index + 1 &&
+                                                            state.queue.entries.getOrNull(index - 1)
+                                                                ?.cycle == entry.cycle
+                                                    )
+                                                        add(
+                                                            PlayerAction(
+                                                                strings[R.string.move_up],
+                                                                "",
+                                                                Icons.Default.KeyboardArrowUp,
+                                                            ) {
+                                                                menu = false
+                                                                onMove(index, index - 1)
+                                                            }
+                                                        )
+                                                    if (
+                                                        index < state.queue.entries.lastIndex &&
+                                                            state.queue.entries.getOrNull(index + 1)
+                                                                ?.cycle == entry.cycle
+                                                    )
+                                                        add(
+                                                            PlayerAction(
+                                                                strings[R.string.move_down],
+                                                                "",
+                                                                Icons.Default.KeyboardArrowDown,
+                                                            ) {
+                                                                menu = false
+                                                                onMove(index, index + 1)
+                                                            }
+                                                        )
+                                                    add(
+                                                        PlayerAction(
+                                                            strings[R.string.remove_from_queue],
+                                                            "",
+                                                            Icons.Default.Close,
+                                                        ) {
+                                                            menu = false
+                                                            onRemove(index)
+                                                        }
+                                                    )
                                                 },
-                                                leadingIcon = { Icon(Icons.Default.Close, null) },
-                                                onClick = {
-                                                    menu = false
-                                                    onRemove(index)
-                                                },
                                             )
-                                        }
                                     }
                                 }
                             }
@@ -1159,6 +1248,17 @@ internal fun QueueSheet(
                 }
         }
     }
+}
+
+private fun livePositionMs(state: PlaybackState): Long {
+    val elapsed =
+        if (state.playing)
+            ((android.os.SystemClock.elapsedRealtime() - state.positionTimestampMs)
+                    .coerceAtLeast(0) * state.speed)
+                .toLong()
+        else 0L
+    val raw = state.positionMs + elapsed
+    return if (state.durationMs > 0) raw.coerceIn(0, state.durationMs) else raw.coerceAtLeast(0)
 }
 
 @Composable
@@ -1181,12 +1281,14 @@ private fun FullPlayerTimeline(track: Track, state: PlaybackState, vm: LadViewMo
                 seek = it
             },
             {
-                vm.playback.seek(seek.toLong())
-                dragging = false
+                if (dragging) {
+                    vm.playback.seek(seek.toLong())
+                    dragging = false
+                }
             },
             playing = clock.playing,
             positionTimestampMs = clock.positionTimestampMs,
-            speed = LocalLadSettings.current.speed,
+            speed = clock.speed,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
@@ -1258,7 +1360,7 @@ private fun SleepChip(until: Long, onClick: () -> Unit) {
                 }
             }
         }
-    TextButton(onClick) {
+    TextButton(onClick, shapes = androidx.compose.material3.ButtonDefaults.shapes()) {
         Icon(Icons.Default.Bedtime, null, Modifier.size(16.dp))
         Text(strings.format(R.string.timer, duration(remaining)))
     }

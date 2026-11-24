@@ -14,10 +14,13 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import coil.imageLoader
 import coil.request.ImageRequest
+import dev.lad.LadApplication
 import dev.lad.data.Settings
+import dev.lad.data.Track
 import dev.lad.domain.CoverPalette
 import dev.lad.util.attempt
 import kotlin.math.*
@@ -43,7 +46,7 @@ fun artworkSeed(uri: String?, enabled: Boolean): Color? {
     val context = LocalContext.current
     val seed by
         produceState<Color?>(null, uri, enabled) {
-            value = null
+            if (!enabled) value = null
             if (enabled && !uri.isNullOrBlank())
                 value =
                     withContext(Dispatchers.IO) {
@@ -51,40 +54,67 @@ fun artworkSeed(uri: String?, enabled: Boolean): Color? {
                             return@withContext it
                         }
                         attempt {
-                            val result =
-                                context.imageLoader.execute(
-                                    ImageRequest.Builder(context)
-                                        .data(uri)
-                                        .size(128)
-                                        .allowHardware(false)
-                                        .build()
+                                val result =
+                                    context.imageLoader.execute(
+                                        ImageRequest.Builder(context)
+                                            .data(uri)
+                                            .size(128)
+                                            .allowHardware(false)
+                                            .build()
+                                    )
+                                val bitmap =
+                                    (result.drawable as? BitmapDrawable)?.bitmap
+                                        ?: return@attempt null
+                                val pixels = IntArray(bitmap.width * bitmap.height)
+                                bitmap.getPixels(
+                                    pixels,
+                                    0,
+                                    bitmap.width,
+                                    0,
+                                    0,
+                                    bitmap.width,
+                                    bitmap.height,
                                 )
-                            val bitmap =
-                                (result.drawable as? BitmapDrawable)?.bitmap ?: return@attempt null
-                            val pixels = IntArray(bitmap.width * bitmap.height)
-                            bitmap.getPixels(
-                                pixels,
-                                0,
-                                bitmap.width,
-                                0,
-                                0,
-                                bitmap.width,
-                                bitmap.height,
-                            )
-                            CoverPalette.seed(pixels)?.let {
-                                Color(it).also { color -> paletteCache.put(uri, color) }
+                                CoverPalette.seed(pixels)?.let {
+                                    Color(it).also { color -> paletteCache.put(uri, color) }
+                                }
                             }
-                        }
                             .getOrNull()
                     }
         }
     return seed
 }
 
+@Composable
+fun trackSeed(track: Track, enabled: Boolean): Color? {
+    val appearance = (LocalContext.current.applicationContext as? LadApplication)?.trackAppearance
+    val revision = appearance?.changes?.collectAsStateWithLifecycle()?.value ?: 0
+    val custom =
+        remember(track.albumId, track.album, track.artist, revision, appearance) {
+            appearance?.albumAccent(track)
+        }
+    val automatic = artworkSeed(track.artwork, enabled && custom == null)
+    return if (enabled && custom != null) Color(custom) else automatic
+}
+
+fun ambientShapeColor(seed: Color, dark: Boolean): Color {
+    val light = seed.luminance()
+    val amount =
+        if (dark) ((.35f - light) / .2f).coerceIn(0f, 1f) * .8f
+        else ((light - .6f) / .3f).coerceIn(0f, 1f) * .35f
+    return lerp(seed, if (dark) Color.White else Color.Black, amount)
+}
+
 fun coverScheme(seed: Color, base: ColorScheme): ColorScheme {
     val dark = base.surface.luminance() < 0.4f
     val surface = lerp(base.surface, seed, if (dark) 0.12f else 0.07f)
-    val primary = lerp(seed, if (dark) Color.White else Color.Black, if (dark) 0.38f else 0.18f)
+    var primary = lerp(seed, if (dark) Color.White else Color.Black, if (dark) 0.38f else 0.18f)
+    repeat(10) {
+        val contrast =
+            (maxOf(primary.luminance(), surface.luminance()) + .05f) /
+                (minOf(primary.luminance(), surface.luminance()) + .05f)
+        if (contrast < 4.5f) primary = lerp(primary, if (dark) Color.White else Color.Black, .1f)
+    }
     val container = lerp(surface, seed, if (dark) 0.24f else 0.15f)
     return base.copy(
         primary = primary,
@@ -177,6 +207,7 @@ fun AmbientBackdrop(
             val saturation = settings.glowSaturation.coerceIn(0f, 1f)
             val gray = Color(seed.luminance(), seed.luminance(), seed.luminance(), 1f)
             val tint = lerp(gray, seed, saturation)
+            val shapeTint = ambientShapeColor(tint, dark)
             val strength = settings.glowStrength.coerceIn(0f, 1.8f)
             val radius = settings.glowRadius.coerceIn(0.5f, 1.6f)
             Box(
@@ -209,18 +240,29 @@ fun AmbientBackdrop(
                             }
                             close()
                         }
-                    val shapes =
-                        listOf(
-                            flower(8, size.width * 0.27f),
-                            flower(3, size.width * 0.20f),
-                            flower(4, size.width * 0.17f),
-                        )
                     val centers =
                         listOf(
                             Offset(size.width * 0.15f, size.height * 0.18f),
                             Offset(size.width * 0.90f, size.height * 0.43f),
-                            Offset(size.width * 0.25f, size.height * 0.78f),
+                            Offset(size.width * 0.16f, size.height * 0.61f),
                         )
+                    val count = 3
+                    val shapes =
+                        (0 until count).map { i ->
+                            when (settings.shapeType) {
+                                "circle" -> flower(0, size.width * .20f * settings.shapeScale)
+                                "flower" -> flower(8, size.width * .23f * settings.shapeScale)
+                                "pebble" -> flower(3, size.width * .23f * settings.shapeScale)
+                                else ->
+                                    flower(
+                                        listOf(8, 3, 4)[i % 3],
+                                        size.width *
+                                            listOf(.27f, .20f, .17f)[i % 3] *
+                                            settings.shapeScale,
+                                    )
+                            }
+                        }
+                    val positions = centers
                     onDrawBehind {
                         val phase = motion.value
                         drawRect(
@@ -230,7 +272,7 @@ fun AmbientBackdrop(
                         drawRect(secondary)
                         if (settings.glowShapes)
                             shapes.forEachIndexed { i, path ->
-                                val center = centers[i]
+                                val center = positions[i]
                                 withTransform({
                                     translate(
                                         center.x + sin(phase + i * 2f) * size.width * 0.05f,
@@ -240,8 +282,17 @@ fun AmbientBackdrop(
                                 }) {
                                     drawPath(
                                         path,
-                                        tint.copy(
-                                            alpha = settings.shapeOpacity.coerceIn(0.02f, 0.16f)
+                                        shapeTint.copy(
+                                            alpha =
+                                                (settings.shapeOpacity *
+                                                        if (dark)
+                                                            1f +
+                                                                .7f *
+                                                                    ((.35f - tint.luminance()) /
+                                                                            .2f)
+                                                                        .coerceIn(0f, 1f)
+                                                        else 1f)
+                                                    .coerceIn(0.02f, 0.32f)
                                         ),
                                     )
                                 }

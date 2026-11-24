@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import androidx.compose.foundation.layout.*
@@ -35,17 +37,25 @@ fun DuplicatesScreen(tracks: List<Track>, vm: LadViewModel) {
                     busy = true
                     done = false
                     scope.launch {
-                        attempt { vm.mediaTools.duplicates(tracks) { a, b -> progress = a to b } }
-                            .onSuccess {
-                                groups = it
-                                done = true
-                            }
-                            .onFailure { error = it.message }
-                        busy = false
+                        try {
+                            attempt {
+                                    vm.mediaTools.duplicates(tracks) { a, b ->
+                                        scope.launch { progress = a to b }
+                                    }
+                                }
+                                .onSuccess {
+                                    groups = it
+                                    done = true
+                                }
+                                .onFailure { error = it.message }
+                        } finally {
+                            busy = false
+                        }
                     }
                 },
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(
                     if (busy) strings.format(R.string.comparing, progress.first, progress.second)
@@ -60,7 +70,7 @@ fun DuplicatesScreen(tracks: List<Track>, vm: LadViewModel) {
             item {
                 SectionTitle(
                     strings.format(R.string.copies, i + 1),
-                    strings.format(R.string.identical_files, group.size),
+                    strings.plural(R.plurals.identical_files, group.size, group.size),
                 )
             }
             items(group, key = { "dup${it.id}" }) { t ->
@@ -74,13 +84,16 @@ fun DuplicatesScreen(tracks: List<Track>, vm: LadViewModel) {
                             "${t.artist} · ${strings.folder(dev.lad.domain.FolderRules.folder(t.path))}",
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        TextButton({
-                            vm.hide(t)
-                            groups =
-                                groups
-                                    .map { rows -> rows.filter { it.id != t.id } }
-                                    .filter { it.isNotEmpty() }
-                        }) {
+                        TextButton(
+                            {
+                                vm.hide(t)
+                                groups =
+                                    groups
+                                        .map { rows -> rows.filter { it.id != t.id } }
+                                        .filter { it.isNotEmpty() }
+                            },
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                        ) {
                             Text(strings[R.string.hide_this_copy])
                         }
                     }
@@ -99,7 +112,12 @@ fun DuplicatesScreen(tracks: List<Track>, vm: LadViewModel) {
                 headlineContent = { Text(edit.title) },
                 supportingContent = { Text(edit.artist) },
                 trailingContent = {
-                    TextButton({ vm.unhide(edit.trackId) }) { Text(strings[R.string.restore]) }
+                    TextButton(
+                        { vm.unhide(edit.trackId) },
+                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    ) {
+                        Text(strings[R.string.restore])
+                    }
                 },
             )
         }

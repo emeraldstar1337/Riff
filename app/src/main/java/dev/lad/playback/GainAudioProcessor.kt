@@ -32,6 +32,13 @@ class GainAudioProcessor : BaseAudioProcessor() {
         dsp.reset()
     }
 
+    override fun onReset() {
+        dsp.reset()
+        published = 0L
+        levels.fill(0f)
+        counts.fill(0)
+    }
+
     override fun queueInput(input: ByteBuffer) {
 
         if (!input.hasRemaining()) return
@@ -39,6 +46,7 @@ class GainAudioProcessor : BaseAudioProcessor() {
         input.order(ByteOrder.nativeOrder())
         val floating = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
         val step = if (floating) 4 else 2
+        val channels = inputAudioFormat.channelCount.coerceAtLeast(1)
         val total = input.remaining() / step
         val now = System.nanoTime()
         val measure = meterEnabled && now - published >= 100_000_000
@@ -60,7 +68,7 @@ class GainAudioProcessor : BaseAudioProcessor() {
             val sample = if (floating) input.float else raw / 32768f
             val value =
                 if (neutral) sample
-                else dsp.samplePrepared(sample * bufferGain, n % inputAudioFormat.channelCount)
+                else dsp.samplePrepared(sample * bufferGain, n % channels)
             if (floating) output.putFloat(value)
             else
                 output.putShort(

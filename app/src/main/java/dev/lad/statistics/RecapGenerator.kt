@@ -104,9 +104,10 @@ object RecapGenerator {
         zone: ZoneId = ZoneId.systemDefault(),
         mergeArtists: Boolean = true,
     ): MusicStats {
-        val rows = history.filter {
-            it.startedAt >= window.start && it.startedAt < window.end && it.listenedMs > 0
-        }
+        val rows =
+            history.filter {
+                it.startedAt >= window.start && it.startedAt < window.end && it.listenedMs > 0
+            }
         val credits = ArtistCredits(history.map { it.artist }, mergeArtists)
         val artistRanks =
             credits
@@ -270,13 +271,25 @@ object RecapGenerator {
                     strings[R.string.every_minute],
                     strings[R.string.time_to_listen],
                     "%,d".format(minutes),
-                    strings.format(R.string.minutes_of_music_hours, minutes / 60),
+                    strings.format(
+                        R.string.minutes_of_music_hours,
+                        strings.plural(R.plurals.music_minutes_label, minutes),
+                        strings.plural(R.plurals.hours, minutes / 60, minutes / 60),
+                    ),
                 ),
                 RecapSlide(
                     strings[R.string.your_rhythm],
                     strings[R.string.on_repeat],
                     stats.plays.toString(),
-                    strings.format(R.string.plays_different_tracks, stats.uniqueTracks),
+                    strings.format(
+                        R.string.plays_different_tracks,
+                        strings.plural(R.plurals.plays, stats.plays),
+                        strings.plural(
+                            R.plurals.different_track_count,
+                            stats.uniqueTracks,
+                            stats.uniqueTracks,
+                        ),
+                    ),
                 ),
                 RecapSlide(
                     strings[R.string.recap_generator_on_repeat],
@@ -296,7 +309,11 @@ object RecapGenerator {
                     strings[R.string.your_voice],
                     strings[R.string.top_artist],
                     artist?.name ?: strings[R.string.new_discoveries],
-                    strings.format(R.string.artists_in_your_history, stats.uniqueArtists),
+                    strings.plural(
+                        R.plurals.artists_in_your_history,
+                        stats.uniqueArtists,
+                        stats.uniqueArtists,
+                    ),
                     listOfNotNull(artist),
                 ),
                 RecapSlide(
@@ -310,10 +327,13 @@ object RecapGenerator {
                     strings[R.string.the_whole_story],
                     strings[R.string.top_album],
                     album?.name ?: strings[R.string.the_first_chapter],
-                    strings.format(
-                        R.string.minutes_with_your_top_album_your,
-                        album?.let { it.listenedMs / 60_000 } ?: 0,
-                    ),
+                    (album?.let { it.listenedMs / 60_000 } ?: 0L).let { albumMinutes ->
+                        strings.plural(
+                            R.plurals.minutes_with_your_top_album_your,
+                            albumMinutes,
+                            albumMinutes,
+                        )
+                    },
                     stats.albums.take(5),
                 ),
                 RecapSlide(
@@ -325,12 +345,16 @@ object RecapGenerator {
                 RecapSlide(
                     strings[R.string.keep_the_feeling],
                     label,
-                    strings.format(R.string.hours, minutes / 60),
+                    strings.plural(R.plurals.hours, minutes / 60, minutes / 60),
                     strings.format(
                         R.string.plays_tracks_artists,
-                        stats.plays,
-                        stats.uniqueTracks,
-                        stats.uniqueArtists,
+                        strings.plural(R.plurals.play_count, stats.plays, stats.plays),
+                        strings.plural(R.plurals.tracks, stats.uniqueTracks, stats.uniqueTracks),
+                        strings.plural(
+                            R.plurals.artist_count,
+                            stats.uniqueArtists,
+                            stats.uniqueArtists,
+                        ),
                     ),
                     stats.tracks.take(3),
                 ),

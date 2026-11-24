@@ -107,6 +107,8 @@ interface MusicDao {
 
     @Query("SELECT * FROM track_edits") suspend fun edits(): List<TrackEdit>
 
+    @Query("SELECT * FROM track_edits WHERE trackId = :id") suspend fun edit(id: Long): TrackEdit?
+
     @Query("SELECT * FROM track_edits WHERE hidden = 1") fun hiddenEdits(): Flow<List<TrackEdit>>
 
     @Upsert suspend fun saveEdit(edit: TrackEdit)

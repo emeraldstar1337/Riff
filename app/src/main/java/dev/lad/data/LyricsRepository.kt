@@ -61,8 +61,11 @@ class LyricsRepository(
         val body =
             request("search?" + query("track_name" to title.trim(), "artist_name" to artist.trim()))
                 ?: return emptyList()
-        val array = JSONArray(body)
-        val candidates = (0 until array.length()).map { parseOnline(array.getJSONObject(it)) }
+        val array = runCatching { JSONArray(body) }.getOrNull() ?: return emptyList()
+        val candidates =
+            (0 until array.length()).mapNotNull { i ->
+                runCatching { parseOnline(array.getJSONObject(i)) }.getOrNull()
+            }
         return LyricsMatch.rank(candidates, title, artist, durationMs, album)
     }
 
@@ -77,8 +80,11 @@ class LyricsRepository(
             )
         if (track.durationMs in 1000..3_600_000) {
             request("get?$signature")?.let { body ->
-                val candidate = parseOnline(JSONObject(body))
-                if (LyricsMatch.exact(candidate, track.title, track.artist, track.durationMs))
+                val candidate = runCatching { parseOnline(JSONObject(body)) }.getOrNull()
+                if (
+                    candidate != null &&
+                        LyricsMatch.exact(candidate, track.title, track.artist, track.durationMs)
+                )
                     return candidate
             }
         }

@@ -27,6 +27,7 @@ object CoverPalette {
         fun color(center: Int): Int {
             val ids = region(center)
             val w = ids.sumOf { weights[it] }
+            if (w <= 0.0 || !w.isFinite()) return 0xff808080.toInt()
             fun component(values: DoubleArray) =
                 (ids.sumOf { values[it] } / w * 255).roundToInt().coerceIn(0, 255)
             return (0xff shl 24) or
@@ -41,6 +42,9 @@ object CoverPalette {
         val all = Histogram()
         val bright = Histogram()
         var colored = 0
+        var opaque = 0
+        val neutral = IntArray(16)
+        val brightness = DoubleArray(16)
         for (pixel in pixels) {
             if ((pixel ushr 24) < 128) continue
             val r = (pixel shr 16 and 255) / 255.0
@@ -49,6 +53,11 @@ object CoverPalette {
             val hi = max(r, max(g, b))
             val lo = min(r, min(g, b))
             val d = hi - lo
+            opaque++
+            val luminance = .2126 * r + .7152 * g + .0722 * b
+            val neutralBin = (luminance * 15).roundToInt().coerceIn(0, 15)
+            neutral[neutralBin]++
+            brightness[neutralBin] += luminance
             if (hi < .08 || d < .04 || d / hi < .12) continue
             val saturation = d / hi
             val hue =
@@ -63,12 +72,15 @@ object CoverPalette {
             if (hi >= .25 && saturation >= .25)
                 bright.add(bin, r, g, b, saturation * saturation * hi)
         }
-        if (colored < max(1, (pixels.size * .08).toInt())) return null
+        if (opaque == 0) return null
+        if (colored < max(1, (opaque * .08).toInt())) {
+            val bin = neutral.indices.maxBy { neutral[it] }
+            val value = (brightness[bin] / neutral[bin] * 255).roundToInt().coerceIn(0, 255)
+            return (0xff shl 24) or (value shl 16) or (value shl 8) or value
+        }
         val candidate = bright.winner()
 
-        return if (
-            bright.population(candidate) >= max(1, max(pixels.size * .08, colored * .12).toInt())
-        )
+        return if (bright.population(candidate) >= max(1, max(opaque * .08, colored * .12).toInt()))
             bright.color(candidate)
         else all.color(all.winner())
     }

@@ -13,8 +13,8 @@ android {
         applicationId = "dev.lad.player"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.9.1"
+        versionCode = 17
+        versionName = "0.9.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingStore =
@@ -64,8 +64,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     testOptions { unitTests.isReturnDefaultValues = true }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
 
 dependencies {

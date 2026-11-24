@@ -143,13 +143,46 @@ class QueueManager(private val random: Random = Random.Default) {
                     state = state.copy(shuffle = enabled)
                     return
                 }
-        val past = state.entries.take(state.index + 1)
-        val future = state.entries.drop(state.index + 1).filter { it.cycle == current.cycle }
-        val sourceOrder = state.source.withIndex().associate { it.value to it.index }
-        val ordered =
-            if (enabled) future.shuffled(random)
-            else future.sortedBy { sourceOrder[it.trackId] ?: Int.MAX_VALUE }
-        state = state.copy(entries = past + ordered, shuffle = enabled)
+        if (enabled == state.shuffle) return
+        if (enabled) {
+            val past = state.entries.take(state.index + 1)
+            val future = state.entries.drop(state.index + 1).filter { it.cycle == current.cycle }
+            state = state.copy(entries = past + future.shuffled(random), shuffle = true)
+        } else {
+            val history = state.entries.takeWhile { it.cycle < current.cycle }
+            val manual =
+                state.entries.filterIndexed { i, entry ->
+                    entry.cycle == current.cycle &&
+                        entry.manual &&
+                        i >= state.index &&
+                        !(i == state.index && entry.trackId in state.source)
+                }
+            val present =
+                state.entries.filter { it.cycle == current.cycle }.map { it.trackId }.toSet()
+            val regular =
+                state.source
+                    .filter { it in present }
+                    .map { QueueEntry(it, current.cycle) }
+                    .toMutableList()
+            manual.forEach { entry ->
+                regular.removeAll { it.trackId == entry.trackId }
+                val original = state.entries.indexOf(entry)
+                val previous =
+                    state.entries.take(original).lastOrNull {
+                        it.cycle == current.cycle &&
+                            regular.any { row -> row.trackId == it.trackId }
+                    }
+                val at = regular.indexOfLast { it.trackId == previous?.trackId } + 1
+                regular.add(at, entry)
+            }
+            val index = regular.indexOfFirst { it.trackId == current.trackId }
+            state =
+                state.copy(
+                    entries = history + regular,
+                    index = history.size + index.coerceAtLeast(0),
+                    shuffle = false,
+                )
+        }
     }
 
     fun removeUpcoming(index: Int) {

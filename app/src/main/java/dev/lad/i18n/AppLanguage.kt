@@ -45,6 +45,7 @@ object AppLanguage {
                 if (language == "system") LocaleList.getEmptyLocaleList()
                 else LocaleList.forLanguageTags(language)
         }
+        dev.lad.widget.RiffWidget.refresh(context)
     }
 
     fun context(context: Context, language: String = current(context)): Context {

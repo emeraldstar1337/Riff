@@ -1,7 +1,6 @@
 package dev.lad.ui
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.*
@@ -42,7 +41,6 @@ fun BitsReveal(
     }
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun BitsTitle(
     text: String,
@@ -51,21 +49,6 @@ fun BitsTitle(
 ) {
     BitsReveal(key = text, modifier = modifier) {
         Text(text, style = style, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-    }
-}
-
-@Composable
-fun BitsFlow(seed: Color, enabled: Boolean, animations: Boolean, modifier: Modifier = Modifier) {
-    if (!enabled) return
-    Canvas(modifier) {
-        drawRect(
-            Brush.radialGradient(
-                listOf(seed.copy(alpha = 0.12f), Color.Transparent),
-                center =
-                    androidx.compose.ui.geometry.Offset(size.width * 0.75f, size.height * 0.18f),
-                radius = size.width * 0.95f,
-            )
-        )
     }
 }
 

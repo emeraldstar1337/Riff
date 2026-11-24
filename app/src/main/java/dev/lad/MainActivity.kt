@@ -22,11 +22,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        (application as LadApplication).playback.uiVisible.value = true
+        (application as LadApplication).playback.onActivityStarted()
     }
 
     override fun onStop() {
-        (application as LadApplication).playback.uiVisible.value = false
+        (application as LadApplication).playback.onActivityStopped()
         super.onStop()
     }
 

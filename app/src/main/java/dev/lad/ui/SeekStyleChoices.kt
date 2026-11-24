@@ -103,7 +103,7 @@ private fun SeekStylePreview(style: String) {
                 4.dp.toPx(),
                 StrokeCap.Round,
             )
-        else drawCircle(color, 10.dp.toPx(), Offset(x, y))
+        else drawCircle(color, 6.dp.toPx(), Offset(x, y))
     }
 }
 
@@ -119,19 +119,13 @@ internal fun DrawScope.drawSeekTrack(
 ) {
     val wavy = style.startsWith("wave")
     val stroke = (if (wavy) 2.5.dp else 4.dp).toPx()
-    val radius = (if (style.endsWith("bar")) 2.dp else 10.dp).toPx()
+    val radius = (if (style.endsWith("bar")) 2.dp else 6.dp).toPx()
     val gap = radius + stroke / 2 + 3.dp.toPx()
     val playedEnd = (handle - gap).coerceAtLeast(start)
     val remainingStart = (handle + gap).coerceAtMost(end)
     val y = size.height / 2
     if (remainingStart < end)
-        drawLine(
-            inactive,
-            Offset(remainingStart, y),
-            Offset(end, y),
-            stroke,
-            StrokeCap.Round,
-        )
+        drawLine(inactive, Offset(remainingStart, y), Offset(end, y), stroke, StrokeCap.Round)
     if (playedEnd <= start) return
     if (!wavy) {
         drawLine(active, Offset(start, y), Offset(playedEnd, y), stroke, StrokeCap.Round)

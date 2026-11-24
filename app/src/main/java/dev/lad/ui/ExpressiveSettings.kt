@@ -1,7 +1,17 @@
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
+
 package dev.lad.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.*
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,14 +23,172 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import dev.lad.R
 import dev.lad.data.Settings
 import dev.lad.domain.LyricLine
 import dev.lad.i18n.rememberText
+
+@Composable
+fun SettingSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit,
+) {
+    Surface(shape = LadShapes.card, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Row(
+            Modifier.fillMaxWidth()
+                .toggleable(
+                    checked,
+                    enabled = enabled,
+                    role = Role.Switch,
+                    onValueChange = onChange,
+                )
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (description.isNotBlank())
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+            }
+            Switch(
+                checked,
+                null,
+                enabled = enabled,
+                thumbContent = {
+                    Icon(
+                        if (checked) Icons.Default.Check else Icons.Default.Close,
+                        null,
+                        Modifier.size(SwitchDefaults.IconSize),
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+fun ChoiceChips(current: String, values: List<Pair<String, String>>, onSelect: (String) -> Unit) {
+    val connected = values.size in 2..3 && values.sumOf { it.second.length } <= 24
+    @Composable
+    fun Choice(index: Int, modifier: Modifier = Modifier) {
+        val (value, name) = values[index]
+        val checked = current == value
+        ToggleButton(
+            checked = checked,
+            contentPadding =
+                if (connected) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                else ButtonDefaults.ContentPadding,
+            onCheckedChange = { onSelect(value) },
+            modifier =
+                modifier.heightIn(min = 48.dp).semantics {
+                    role = Role.RadioButton
+                    selected = checked
+                },
+            shapes =
+                if (!connected) ToggleButtonDefaults.shapes()
+                else
+                    when (index) {
+                        0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                        values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                    },
+        ) {
+            Text(name)
+        }
+    }
+    if (connected)
+        Row(
+            Modifier.fillMaxWidth().selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            values.indices.forEach { Choice(it, Modifier.weight(1f)) }
+        }
+    else
+        FlowRow(
+            Modifier.fillMaxWidth().selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            values.indices.forEach { Choice(it) }
+        }
+}
+
+@Composable
+internal fun AppearanceSlider(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onSave: (Float) -> Unit,
+) =
+    SettingsSlider(
+        title,
+        rememberText().format(R.string.decimal_two, value),
+        value,
+        range,
+        onSave = onSave,
+    )
+
+@Composable
+internal fun SettingsSlider(
+    title: String,
+    summary: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    enabled: Boolean = true,
+    onSave: (Float) -> Unit,
+) {
+    val strings = rememberText()
+    var draft by remember(value) { mutableFloatStateOf(value.coerceIn(range)) }
+    Surface(shape = LadShapes.card, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (draft == value) summary else strings.format(R.string.decimal_two, draft),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            Slider(
+                draft,
+                { draft = it },
+                valueRange = range,
+                steps = steps,
+                enabled = enabled,
+                onValueChangeFinished = { onSave(draft) },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun SettingsAction(
+    title: String,
+    detail: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) = StyleChoice(title, detail, false, icon, onClick)
 
 internal data class PlayerAction(
     val title: String,
@@ -36,41 +204,28 @@ internal fun ExpressiveActions(
     onClose: () -> Unit,
     actions: List<PlayerAction>,
 ) {
-    val strings = rememberText()
-    Dialog(onDismissRequest = onClose) {
-        Surface(
-            shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
+    ExpressiveSheet(onClose) {
+        Column(
+            Modifier.widthIn(max = 640.dp)
+                .fillMaxWidth()
+                .heightIn(max = 600.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(
-                Modifier.fillMaxWidth()
-                    .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            detail,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClose) {
-                        Icon(Icons.Default.Close, strings[R.string.close_actions])
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                actions.forEach { action ->
-                    StyleChoice(action.title, action.detail, false, action.icon, action.run)
-                }
+            Text(title, style = MaterialTheme.typography.headlineSmall)
+            if (detail.isNotBlank())
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            Spacer(Modifier.height(8.dp))
+            actions.forEach { action ->
+                StyleChoice(action.title, action.detail, false, action.icon, action.run)
             }
+            Spacer(Modifier.height(20.dp))
         }
     }
 }
@@ -84,20 +239,34 @@ internal fun StyleChoice(
     onClick: () -> Unit,
 ) {
     val strings = rememberText()
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(if (selected) 28.dp else 20.dp),
-        color =
+    val animations = LocalLadSettings.current.animations
+    val corner by
+        animateDpAsState(
+            if (selected) 28.dp else 20.dp,
+            if (animations) MaterialTheme.motionScheme.fastSpatialSpec() else snap(),
+            label = "choice corner",
+        )
+    val iconCorner by
+        animateDpAsState(
+            if (selected) 16.dp else 24.dp,
+            if (animations) MaterialTheme.motionScheme.fastSpatialSpec() else snap(),
+            label = "choice icon corner",
+        )
+    val container by
+        animateColorAsState(
             if (selected) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
+            if (animations) MaterialTheme.motionScheme.fastEffectsSpec() else snap(),
+            label = "choice container",
+        )
+    Surface(onClick = onClick, shape = RoundedCornerShape(corner), color = container) {
         Row(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Surface(
-                shape = if (selected) RoundedCornerShape(16.dp) else CircleShape,
+                shape = RoundedCornerShape(iconCorner),
                 color = MaterialTheme.colorScheme.primaryContainer,
             ) {
                 Icon(
@@ -113,18 +282,21 @@ internal fun StyleChoice(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (description.isNotBlank())
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             }
-            if (selected)
-                Icon(
-                    Icons.Default.CheckCircle,
-                    strings[R.string.selection_label],
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+            Box(Modifier.size(24.dp)) {
+                if (selected)
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        strings[R.string.selection_label],
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+            }
         }
     }
 }
@@ -258,7 +430,7 @@ internal fun NavigationPreview(selected: List<String>, names: Map<String, String
                                 else Color.Transparent,
                         ) {
                             Icon(
-                                icons.getValue(key),
+                                icons[key] ?: Icons.Default.Home,
                                 names[key],
                                 Modifier.padding(12.dp).size(24.dp),
                             )
@@ -267,7 +439,7 @@ internal fun NavigationPreview(selected: List<String>, names: Map<String, String
                 }
             }
             Text(
-                selected.joinToString(" → ") { names.getValue(it) },
+                selected.joinToString(" → ") { names[it] ?: it },
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -284,8 +456,7 @@ internal fun LyricsStylePreview(settings: Settings) {
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(18.dp),
-                verticalArrangement =
-                    Arrangement.spacedBy(((settings.lyricsSpacing - 1f) * 48f).dp),
+                verticalArrangement = Arrangement.spacedBy(((settings.lyricsSpacing - 1f) * 48f).dp),
             ) {
                 Text(
                     strings[R.string.lyrics_preview],

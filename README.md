@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="app/src/main/res/drawable-nodpi/ic_riff_foreground.png" alt="Riff Logo" width="128" height="128" />
+<img src="docs/riff-logo.svg" alt="Riff Logo" width="128" height="128" />
 
 # Riff
 

@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package dev.lad.ui
 
@@ -35,26 +38,28 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
             if (uri != null)
                 scope.launch {
                     attempt {
-                        context.contentResolver.takePersistableUriPermission(
-                            uri,
-                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
-                        if (coverForAlbum) vm.saveAlbumCover(track.albumId, uri.toString())
-                        else
-                            vm.saveEdit(
-                                editedTrack,
-                                TrackEdit(
-                                    track.id,
-                                    editedTrack.title,
-                                    editedTrack.artist,
-                                    editedTrack.album,
-                                    editedTrack.year,
-                                    editedTrack.genre,
-                                    uri.toString(),
-                                ),
-                            )
-                        editedTrack = editedTrack.copy(customArtwork = uri.toString())
-                    }
+                            attempt {
+                                context.contentResolver.takePersistableUriPermission(
+                                    uri,
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                )
+                            }
+                            if (coverForAlbum) vm.saveAlbumCover(track.albumId, uri.toString())
+                            else
+                                vm.saveEdit(
+                                    editedTrack,
+                                    TrackEdit(
+                                        track.id,
+                                        editedTrack.title,
+                                        editedTrack.artist,
+                                        editedTrack.album,
+                                        editedTrack.year,
+                                        editedTrack.genre,
+                                        uri.toString(),
+                                    ),
+                                )
+                            editedTrack = editedTrack.copy(customArtwork = uri.toString())
+                        }
                         .onFailure { error = it.message }
                 }
         }
@@ -65,10 +70,13 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
             if (uri != null)
                 scope.launch {
                     busy = true
-                    attempt { vm.mediaTools.exportTags(editedTrack, uri) }
-                        .onSuccess { error = strings[R.string.a_copy_with_updated_tags_has] }
-                        .onFailure { error = it.message }
-                    busy = false
+                    try {
+                        attempt { vm.mediaTools.exportTags(editedTrack, uri) }
+                            .onSuccess { error = strings[R.string.a_copy_with_updated_tags_has] }
+                            .onFailure { error = it.message }
+                    } finally {
+                        busy = false
+                    }
                 }
         }
     LaunchedEffect(track.id) {
@@ -162,7 +170,11 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
                     details?.filename.orEmpty(),
             )
             error?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-            Button({ editing = true }, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                { editing = true },
+                modifier = Modifier.fillMaxWidth(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
                 Icon(Icons.Default.Edit, null)
                 Text(strings[R.string.edit_tags])
             }
@@ -172,6 +184,7 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
                     coverPicker.launch(arrayOf("image/*"))
                 },
                 modifier = Modifier.fillMaxWidth(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.track_artwork])
             }
@@ -181,16 +194,19 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
                     coverPicker.launch(arrayOf("image/*"))
                 },
                 modifier = Modifier.fillMaxWidth(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.album_artwork])
             }
+            val currentDetails = details
             FilledTonalButton(
-                { exporter.launch(details?.filename ?: "${editedTrack.title}.mp3") },
+                { exporter.launch(currentDetails?.filename ?: "${editedTrack.title}.mp3") },
                 enabled =
                     !busy &&
-                        details != null &&
-                        !details!!.filename.endsWith(".opus", ignoreCase = true),
+                        currentDetails != null &&
+                        !currentDetails.filename.endsWith(".opus", ignoreCase = true),
                 modifier = Modifier.fillMaxWidth(),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(
                     if (busy) strings[R.string.writing_tags]
@@ -255,23 +271,23 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
                     {
                         scope.launch {
                             attempt {
-                                vm.saveEdit(
-                                    editedTrack,
-                                    TrackEdit(
-                                        track.id,
-                                        title.trim().ifBlank { strings[R.string.untitled] },
-                                        artist.trim().ifBlank {
-                                            strings[R.string.unknown_artist]
-                                        },
-                                        album.trim().ifBlank {
-                                            strings[R.string.unknown_album]
-                                        },
-                                        year.toIntOrNull()?.coerceIn(0, 9999) ?: 0,
-                                        genre.trim(),
-                                        editedTrack.customArtwork,
-                                    ),
-                                )
-                            }
+                                    vm.saveEdit(
+                                        editedTrack,
+                                        TrackEdit(
+                                            track.id,
+                                            title.trim().ifBlank { strings[R.string.untitled] },
+                                            artist.trim().ifBlank {
+                                                strings[R.string.unknown_artist]
+                                            },
+                                            album.trim().ifBlank {
+                                                strings[R.string.unknown_album]
+                                            },
+                                            year.toIntOrNull()?.coerceIn(0, 9999) ?: 0,
+                                            genre.trim(),
+                                            editedTrack.customArtwork,
+                                        ),
+                                    )
+                                }
                                 .onSuccess {
                                     editedTrack =
                                         editedTrack.copy(
@@ -294,11 +310,19 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
                         }
                     },
                     enabled = title.isNotBlank(),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.save])
                 }
             },
-            dismissButton = { TextButton({ editing = false }) { Text(strings[R.string.cancel]) } },
+            dismissButton = {
+                TextButton(
+                    { editing = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.cancel])
+                }
+            },
         )
     }
 }

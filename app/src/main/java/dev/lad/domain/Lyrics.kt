@@ -112,6 +112,7 @@ object LrcParser {
             .lineSequence()
             .flatMap { raw ->
                 val stamps = stamp.findAll(raw).toList()
+                if (stamps.isEmpty()) return@flatMap emptySequence()
                 val (words, timedWords) = content(raw.replace(stamp, ""))
                 val first = stamps.firstNotNullOfOrNull(::time) ?: 0L
                 stamps.asSequence().mapNotNull { m ->
@@ -146,7 +147,7 @@ object LrcParser {
         var low = 0
         var high = lines.size
         while (low < high) {
-            val middle = (low + high) / 2
+            val middle = (low + high) ushr 1
             if (lines[middle].timeMs <= positionMs) low = middle + 1 else high = middle
         }
         return low - 1

@@ -8,6 +8,8 @@ import dev.lad.util.attempt
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -54,6 +56,12 @@ data class Settings(
     val lyricsAlignment: String = "start",
     val lyricsDim: Float = 0.46f,
     val mergeArtists: Boolean = true,
+    val bitPerfect: Boolean = false,
+    val coverTransition: String = "fade",
+    val shapeScale: Float = 1f,
+    val shapeType: String = "mixed",
+    val dateFormat: String = "system",
+    val artistPhotos: Boolean = true,
 )
 
 class SettingsStore(private val context: Context) {
@@ -96,7 +104,14 @@ class SettingsStore(private val context: Context) {
     private val lyricsAlignment = stringPreferencesKey("lyricsAlignment")
     private val lyricsDim = floatPreferencesKey("lyricsDim")
     private val mergeArtists = booleanPreferencesKey("mergeArtists")
+    private val artistPhotos = booleanPreferencesKey("artistPhotos")
+    private val bitPerfect = booleanPreferencesKey("bitPerfect")
+    private val dateFormat = stringPreferencesKey("dateFormat")
+    private val shapeType = stringPreferencesKey("shapeType")
+    private val shapeScale = floatPreferencesKey("shapeScale")
+    private val coverTransition = stringPreferencesKey("coverTransition")
     private val historyKey = stringPreferencesKey("queue_history_v1")
+    private val queueMutex = Mutex()
     private var cachedHistory: List<QueueRevision>? = null
 
     private fun readSettings(p: Preferences): Settings =
@@ -115,7 +130,7 @@ class SettingsStore(private val context: Context) {
             p[inclusions] ?: "",
             p[accent] ?: "violet",
             p[black] ?: false,
-            p[shape] ?: "rounded",
+            p[shape]?.takeIf { it in setOf("rounded", "circle", "flower") } ?: "rounded",
             p[recapCover] ?: true,
             p[ambient] ?: true,
             p[playerStyle] ?: "immersive",
@@ -139,6 +154,12 @@ class SettingsStore(private val context: Context) {
             p[lyricsAlignment] ?: "start",
             p[lyricsDim] ?: 0.46f,
             p[mergeArtists] ?: true,
+            p[bitPerfect] ?: false,
+            p[coverTransition]?.takeIf { it in setOf("fade", "zoom", "cards", "morph") } ?: "fade",
+            p[shapeScale] ?: 1f,
+            p[shapeType] ?: "mixed",
+            p[dateFormat] ?: "system",
+            p[artistPhotos] ?: true,
         )
 
     val settings = context.ladSettings.data.map(::readSettings).distinctUntilChanged()
@@ -204,6 +225,12 @@ class SettingsStore(private val context: Context) {
             p[lyricsAlignment] = value.lyricsAlignment
             p[lyricsDim] = value.lyricsDim
             p[mergeArtists] = value.mergeArtists
+            p[artistPhotos] = value.artistPhotos
+            p[bitPerfect] = value.bitPerfect
+            p[coverTransition] = value.coverTransition
+            p[shapeScale] = value.shapeScale
+            p[shapeType] = value.shapeType
+            p[dateFormat] = value.dateFormat
         }
         return updated
     }
@@ -228,36 +255,38 @@ class SettingsStore(private val context: Context) {
                 .getOrDefault(emptyList())
         }
 
-    suspend fun saveQueue(snapshot: QueueSnapshot, history: List<QueueRevision>? = null) {
-        context.ladPosition.edit { p ->
-            p[positionKey] = snapshot.playbackMs
-            p[positionItemKey] = positionItem(snapshot)
-        }
-        val timeline = snapshot.copy(playbackMs = 0)
-        if (timeline == cachedQueue && (history == null || history == cachedHistory)) return
-        context.ladSettings.edit { p ->
-            if (timeline != cachedQueue) p[queueKey] = encodeQueue(timeline)
-            if (history != null && history != cachedHistory) {
-                val json =
-                    JSONArray()
-                        .apply {
-                            history.forEach { row ->
-                                put(
-                                    JSONObject()
-                                        .put("id", row.id)
-                                        .put("label", row.label)
-                                        .put("time", row.createdAt)
-                                        .put("snapshot", encodeQueue(row.snapshot))
-                                )
-                            }
-                        }
-                        .toString()
-                p[historyKey] = json
+    suspend fun saveQueue(snapshot: QueueSnapshot, history: List<QueueRevision>? = null) =
+        queueMutex.withLock {
+            context.ladPosition.edit { p ->
+                p[positionKey] = snapshot.playbackMs
+                p[positionItemKey] = positionItem(snapshot)
             }
+            val timeline = snapshot.copy(playbackMs = 0)
+            if (timeline == cachedQueue && (history == null || history == cachedHistory))
+                return@withLock
+            context.ladSettings.edit { p ->
+                if (timeline != cachedQueue) p[queueKey] = encodeQueue(timeline)
+                if (history != null && history != cachedHistory) {
+                    val json =
+                        JSONArray()
+                            .apply {
+                                history.forEach { row ->
+                                    put(
+                                        JSONObject()
+                                            .put("id", row.id)
+                                            .put("label", row.label)
+                                            .put("time", row.createdAt)
+                                            .put("snapshot", encodeQueue(row.snapshot))
+                                    )
+                                }
+                            }
+                            .toString()
+                    p[historyKey] = json
+                }
+            }
+            cachedQueue = timeline
+            if (history != null) cachedHistory = history
         }
-        cachedQueue = timeline
-        if (history != null) cachedHistory = history
-    }
 
     suspend fun updateAudioProfile(device: String, profile: SoundProfile) {
         context.ladSettings.edit { p ->
@@ -295,18 +324,22 @@ class SettingsStore(private val context: Context) {
             val j = JSONObject(text)
             val source = j.getJSONArray("source")
             val entries = j.getJSONArray("entries")
-            return QueueSnapshot(
-                (0 until source.length()).map { source.getLong(it) },
+            val entryList =
                 (0 until entries.length()).map {
                     entries.getJSONObject(it).let { o ->
                         QueueEntry(o.getLong("id"), o.getInt("cycle"), o.optBoolean("manual"))
                     }
-                },
-                j.getInt("index"),
-                j.getBoolean("shuffle"),
-                RepeatMode.valueOf(j.getString("repeat")),
-                j.getString("context"),
-                j.getLong("position"),
+                }
+            val repeatName = j.optString("repeat", RepeatMode.QUEUE.name)
+            val repeat = RepeatMode.entries.firstOrNull { it.name == repeatName } ?: RepeatMode.QUEUE
+            return QueueSnapshot(
+                (0 until source.length()).map { source.getLong(it) },
+                entryList,
+                if (entryList.isEmpty()) 0 else j.optInt("index", 0).coerceIn(0, entryList.lastIndex),
+                j.optBoolean("shuffle", false),
+                repeat,
+                j.optString("context", "All tracks"),
+                j.optLong("position", 0L).coerceAtLeast(0L),
             )
         }
     }

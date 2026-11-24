@@ -42,6 +42,7 @@ class PlaybackService : MediaSessionService() {
         var peakTag: String? = null
         var audioTrack: android.media.AudioTrack? = null
         var routingListener: android.media.AudioRouting.OnRoutingChangedListener? = null
+        @Volatile var released = false
     }
 
     private lateinit var active: Slot
@@ -64,7 +65,17 @@ class PlaybackService : MediaSessionService() {
         get() = application as LadApplication
 
     private var tracks = emptyMap<Long, Track>()
-    private var settings = Settings()
+    @Volatile private var settings = Settings()
+    private val effectiveSpeed
+        get() = if (settings.bitPerfect) 1f else settings.speed
+
+    private val effectiveFade
+        get() = if (settings.bitPerfect) 0 else settings.crossfadeSeconds
+
+    private var destroying = false
+    private val usb by lazy {
+        UsbBitPerfect(this) { if (::active.isInitialized && !destroying) publish() }
+    }
     private val liveProfiles = mutableMapOf<String, SoundProfile>()
     private var deviceKey = "speaker"
     private var deviceName = "Phone speaker"
@@ -102,6 +113,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        usb.start()
         active = createSlot(true)
         audioManager.registerAudioDeviceCallback(deviceCallback, android.os.Handler(mainLooper))
         updateRoute()
@@ -198,8 +210,9 @@ class PlaybackService : MediaSessionService() {
             try {
                 journal.load(app.settings.queueHistory.first())
                 settings = app.settings.settings.first()
+                usb.setEnabled(settings.bitPerfect)
                 player.setHandleAudioBecomingNoisy(settings.pauseOnDisconnect)
-                player.setPlaybackSpeed(settings.speed)
+                player.setPlaybackSpeed(effectiveSpeed)
                 updateRoute()
                 updateGain(active)
                 tracks =
@@ -239,20 +252,23 @@ class PlaybackService : MediaSessionService() {
                 app.settings.settings.collect { next ->
                     val previous = settings
                     val fadeChanged = previous.crossfadeSeconds != next.crossfadeSeconds
+                    val bitChanged = previous.bitPerfect != next.bitPerfect
+                    val hadNativeOutput = usb.hasNativeOutput
                     if (!next.statistics && settings.statistics) {
                         flushListen()
                         listen = null
                         fadeListen = null
                     }
                     settings = next
+                    if (bitChanged) usb.setEnabled(next.bitPerfect)
                     if (previous.pauseOnDisconnect != next.pauseOnDisconnect)
                         player.setHandleAudioBecomingNoisy(next.pauseOnDisconnect)
                     spare?.player?.setHandleAudioBecomingNoisy(next.pauseOnDisconnect)
-                    if (previous.speed != next.speed) {
-                        player.setPlaybackSpeed(next.speed)
-                        spare?.player?.setPlaybackSpeed(next.speed)
+                    if (previous.speed != next.speed || bitChanged) {
+                        player.setPlaybackSpeed(effectiveSpeed)
+                        spare?.player?.setPlaybackSpeed(effectiveSpeed)
                     }
-                    if (previous.audioProfiles != next.audioProfiles) updateRoute()
+                    if (previous.audioProfiles != next.audioProfiles || bitChanged) updateRoute()
                     if (previous.replayGain != next.replayGain) {
                         updateGain(active)
                         spare?.let { updateGain(it) }
@@ -261,14 +277,20 @@ class PlaybackService : MediaSessionService() {
                         previous.speed != next.speed ||
                             previous.replayGain != next.replayGain ||
                             fadeChanged ||
-                            previous.visualizer != next.visualizer
+                            previous.visualizer != next.visualizer ||
+                            bitChanged
                     ) {
                         applyAudioPolicy()
                         wakeups.trySend(Unit)
                     }
-                    if (fadeChanged) {
+                    if (fadeChanged || bitChanged) {
                         cancelFade()
                         prepareFade()
+                    }
+                    if (bitChanged) {
+                        app.playback.publishLevels(List(24) { 0f })
+                        if (hadNativeOutput || usb.hasNativeOutput) restartAudioOutput()
+                        else publish()
                     }
                     if (next.statistics && listen == null && player.isPlaying) beginListen()
                 }
@@ -310,8 +332,7 @@ class PlaybackService : MediaSessionService() {
                                         if (kept.isEmpty()) 0
                                         else if (currentKept >= 0) currentKept
                                         else if (next >= 0) next else kept.lastIndex,
-                                    playbackMs =
-                                        if (currentKept >= 0) player.currentPosition else 0,
+                                    playbackMs = if (currentKept >= 0) player.currentPosition else 0,
                                 )
                             )
                             cancelFade()
@@ -345,11 +366,7 @@ class PlaybackService : MediaSessionService() {
             while (isActive) {
                 val nowBefore = SystemClock.elapsedRealtime()
                 val fade =
-                    PlaybackPowerPolicy.fadeWindow(
-                        settings.crossfadeSeconds,
-                        player.duration,
-                        settings.speed,
-                    )
+                    PlaybackPowerPolicy.fadeWindow(effectiveFade, player.duration, effectiveSpeed)
                 val remaining =
                     if (player.duration > 0) player.duration - player.currentPosition
                     else Long.MAX_VALUE
@@ -361,7 +378,7 @@ class PlaybackService : MediaSessionService() {
                             queue.state.index + 1 < queue.state.entries.size &&
                             remaining != Long.MAX_VALUE
                     )
-                        (remaining / settings.speed.coerceAtLeast(0.25f) -
+                        (remaining / effectiveSpeed.coerceAtLeast(0.25f) -
                                 fade -
                                 if (spare == null) 2500 else 0)
                             .toLong()
@@ -370,7 +387,7 @@ class PlaybackService : MediaSessionService() {
                 val lyricsDelay =
                     if (nextLyric == Long.MAX_VALUE) 1000L
                     else
-                        ((nextLyric - player.currentPosition) / settings.speed.coerceAtLeast(0.25f))
+                        ((nextLyric - player.currentPosition) / effectiveSpeed.coerceAtLeast(0.25f))
                             .toLong()
                             .coerceIn(50, 1000)
                 val interval =
@@ -434,42 +451,77 @@ class PlaybackService : MediaSessionService() {
     private fun createSlot(focus: Boolean): Slot {
         val processor = GainAudioProcessor()
         lateinit var slot: Slot
+        lateinit var directSink: BitPerfectAudioSink
         val renderers =
             object : androidx.media3.exoplayer.DefaultRenderersFactory(this) {
                 override fun buildAudioSink(
                     context: android.content.Context,
                     enableFloatOutput: Boolean,
                     enableAudioTrackPlaybackParams: Boolean,
-                ): androidx.media3.exoplayer.audio.AudioSink =
-                    androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
-                        .setEnableFloatOutput(false)
-                        .setAudioTrackProvider { config, attributes, sessionId, sinkContext ->
-                            val audioTrack =
-                                androidx.media3.exoplayer.audio.DefaultAudioSink.AudioTrackProvider
-                                    .DEFAULT
-                                    .getAudioTrack(config, attributes, sessionId, sinkContext)
-                            val listener =
-                                android.media.AudioRouting.OnRoutingChangedListener {
-                                    if (::active.isInitialized && slot === active) updateRoute()
-                                }
-                            audioTrack.addOnRoutingChangedListener(
-                                listener,
-                                android.os.Handler(mainLooper),
-                            )
-                            scope.launch {
-                                slot.audioTrack?.let { old ->
-                                    slot.routingListener?.let {
-                                        old.removeOnRoutingChangedListener(it)
-                                    }
-                                }
-                                slot.audioTrack = audioTrack
-                                slot.routingListener = listener
-                                if (::active.isInitialized && slot === active) updateRoute()
+                ): androidx.media3.exoplayer.audio.AudioSink {
+                    val normal =
+                        androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                            .setEnableFloatOutput(false)
+                            .setAudioTrackProvider { config, attributes, sessionId, sinkContext ->
+                                val audioTrack =
+                                    androidx.media3.exoplayer.audio.DefaultAudioSink
+                                        .AudioTrackProvider
+                                        .DEFAULT
+                                        .getAudioTrack(config, attributes, sessionId, sinkContext)
+                                attachAudioTrack(slot, audioTrack)
+                                audioTrack
                             }
-                            audioTrack
+                            .setAudioProcessors(arrayOf(processor))
+                            .build()
+                    directSink =
+                        BitPerfectAudioSink(
+                            normal,
+                            usb,
+                            { settings.bitPerfect },
+                            { track -> attachAudioTrack(slot, track) },
+                            {
+                                scope.launch {
+                                    if (::active.isInitialized && slot === active) player.pause()
+                                }
+                            },
+                            { track -> detachAudioTrack(slot, track) },
+                        )
+                    return directSink
+                }
+
+                override fun buildAudioRenderers(
+                    context: android.content.Context,
+                    extensionRendererMode: Int,
+                    mediaCodecSelector: androidx.media3.exoplayer.mediacodec.MediaCodecSelector,
+                    enableDecoderFallback: Boolean,
+                    audioSink: androidx.media3.exoplayer.audio.AudioSink,
+                    eventHandler: android.os.Handler,
+                    eventListener: androidx.media3.exoplayer.audio.AudioRendererEventListener,
+                    out: java.util.ArrayList<androidx.media3.exoplayer.Renderer>,
+                ) {
+                    out.add(
+                        object :
+                            androidx.media3.exoplayer.audio.MediaCodecAudioRenderer(
+                                context,
+                                codecAdapterFactory,
+                                mediaCodecSelector,
+                                enableDecoderFallback,
+                                eventHandler,
+                                eventListener,
+                                audioSink,
+                                if (android.os.Build.VERSION.SDK_INT >= 35 && !settings.bitPerfect)
+                                    androidx.media3.exoplayer.mediacodec.LoudnessCodecController()
+                                else null,
+                            ) {
+                            override fun onInputFormatChanged(
+                                holder: androidx.media3.exoplayer.FormatHolder
+                            ): androidx.media3.exoplayer.DecoderReuseEvaluation? {
+                                holder.format?.let { directSink.setSource(it) }
+                                return super.onInputFormatChanged(holder)
+                            }
                         }
-                        .setAudioProcessors(arrayOf(processor))
-                        .build()
+                    )
+                }
             }
         val p =
             ExoPlayer.Builder(this, renderers)
@@ -498,6 +550,18 @@ class PlaybackService : MediaSessionService() {
             liveProfiles[deviceKey] ?: SoundProfiles.read(settings.audioProfiles, deviceKey)
         p.addListener(
             object : Player.Listener {
+                override fun onEvents(player: Player, events: Player.Events) {
+                    if (!::active.isInitialized || slot !== active || syncing) return
+                    if (
+                        events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) ||
+                            events.contains(Player.EVENT_TIMELINE_CHANGED) ||
+                            events.contains(Player.EVENT_POSITION_DISCONTINUITY)
+                    ) {
+                        alignQueueWithPlayer()
+                        publish()
+                    }
+                }
+
                 override fun onMetadata(metadata: Metadata) {
                     updateGainTags(slot, metadata)
                 }
@@ -571,6 +635,7 @@ class PlaybackService : MediaSessionService() {
                         cancelFade()
                         prepareFade()
                     }
+                    alignQueueWithPlayer()
                     save()
                     publish()
                 }
@@ -600,7 +665,8 @@ class PlaybackService : MediaSessionService() {
 
     private suspend fun handle(args: Bundle) {
         val action = args.getString("action")
-        if (action !in listOf("sleep", "clearStats", "sound")) cancelFade()
+        if (action !in listOf("sleep", "clearStats", "sound", "toggle")) cancelFade()
+        alignQueueWithPlayer()
         if (action in listOf("start", "insert", "shuffle", "repeat", "remove", "move")) {
             if (action == "remove")
                 require(
@@ -628,6 +694,38 @@ class PlaybackService : MediaSessionService() {
             )
         }
         when (action) {
+            "next" -> {
+                extendQueue()
+                if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+            }
+            "previous" -> {
+                if (player.currentPosition > 3000) player.seekTo(0)
+                else if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+            }
+            "toggle" -> {
+                if (player.playWhenReady) player.pause()
+                else if (player.playbackState == Player.STATE_ENDED) {
+                    flushListen()
+                    withSyncing { player.seekTo(0) }
+                    beginListen()
+                    player.play()
+                } else {
+                    if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                    player.play()
+                }
+            }
+            "favorite" ->
+                queue.state.current?.trackId?.let { id ->
+                    tracks[id]?.let { app.music.toggleFavorite(it) }
+                }
+            "jump" -> {
+                val index = args.getInt("index", -1)
+                val id = args.getLong("id", -1)
+                if (queue.state.entries.getOrNull(index)?.trackId == id) {
+                    player.seekTo(index, 0)
+                    player.play()
+                }
+            }
             "restoreQueue" -> {
                 val revision = args.getLong("revision")
                 val saved =
@@ -707,9 +805,7 @@ class PlaybackService : MediaSessionService() {
             }
             "restart" -> {
                 flushListen()
-                syncing = true
-                player.seekTo(0)
-                syncing = false
+                withSyncing { player.seekTo(0) }
                 beginListen()
                 player.play()
             }
@@ -720,15 +816,31 @@ class PlaybackService : MediaSessionService() {
                     ?.takeIf { it.available && eligible(it, settings) }
                     ?.let { tracks = tracks + (id to it) }
                     ?: error(strings[R.string.track_unavailable])
-                flushListen()
-                queue.insertNow(id)
-                rebuild(true)
-                player.play()
-                beginListen()
+                val existing =
+                    if (!queue.state.shuffle && id in queue.state.source)
+                        queue.state.entries.indexOfFirst {
+                            it.trackId == id && it.cycle == queue.state.current?.cycle && !it.manual
+                        }
+                    else -1
+                error = null
+                failures = 0
+                if (existing >= 0) {
+                    val sameIndex = existing == player.currentMediaItemIndex
+                    if (sameIndex) flushListen()
+                    player.seekTo(existing, 0)
+                    if (sameIndex) beginListen()
+                    player.play()
+                } else {
+                    flushListen()
+                    queue.insertNow(id)
+                    rebuild(true)
+                    player.play()
+                    beginListen()
+                }
             }
             "shuffle" -> {
                 queue.toggleShuffle(args.getBoolean("enabled"))
-                rebuild(player.playWhenReady, player.currentPosition)
+                reorderQueue()
             }
             "repeat" -> {
                 val next =
@@ -796,8 +908,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun updateRoute() {
+        val hadNativeOutput = usb.hasNativeOutput
+        val usbChanged = usb.refreshDevices()
         val outputs = audioManager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
-        val routed = if (::active.isInitialized) active.audioTrack?.routedDevice else null
+        val routed =
+            if (::active.isInitialized) attempt { active.audioTrack?.routedDevice }.getOrNull()
+            else null
         val preferred =
             routed
                 ?: outputs.firstOrNull {
@@ -818,10 +934,11 @@ class PlaybackService : MediaSessionService() {
                             android.media.AudioDeviceInfo.TYPE_USB_DEVICE,
                         )
                 }
-        val external = preferred?.takeUnless {
-            it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ||
-                it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
-        }
+        val external =
+            preferred?.takeUnless {
+                it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+            }
         deviceKey =
             external?.let {
                 val legacy = "${it.type}:${it.productName}"
@@ -840,6 +957,13 @@ class PlaybackService : MediaSessionService() {
         if (::active.isInitialized) {
             applyAudioPolicy()
             publish()
+            if (usbChanged && settings.bitPerfect && ready.isCompleted) {
+                if (
+                    settings.pauseOnDisconnect && usb.state().status == BitPerfectStatus.CONNECT_USB
+                )
+                    player.pause()
+                if (hadNativeOutput || usb.hasNativeOutput) restartAudioOutput()
+            }
         } else wakeups.trySend(Unit)
     }
 
@@ -855,21 +979,27 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyAudioPolicy() {
         if (!::active.isInitialized) return
+        active.gain.dsp.profile =
+            if (settings.bitPerfect) SoundProfile()
+            else liveProfiles[deviceKey] ?: SoundProfiles.read(settings.audioProfiles, deviceKey)
+        updateGain(active)
         val meter =
             app.playback.uiVisible.value &&
                 app.playback.meterVisible.value &&
                 settings.visualizer &&
-                !saving()
+                !saving() &&
+                !settings.bitPerfect
         active.gain.meterEnabled = meter
         spare?.gain?.meterEnabled = false
         val offload =
-            PlaybackPowerPolicy.offload(
-                active.gain.dsp.profile,
-                settings.replayGain,
-                settings.crossfadeSeconds,
-                settings.speed,
-                meter,
-            )
+            !settings.bitPerfect &&
+                PlaybackPowerPolicy.offload(
+                    active.gain.dsp.profile,
+                    settings.replayGain,
+                    effectiveFade,
+                    effectiveSpeed,
+                    meter,
+                )
         val preferences =
             TrackSelectionParameters.AudioOffloadPreferences.Builder()
                 .setAudioOffloadMode(
@@ -890,7 +1020,9 @@ class PlaybackService : MediaSessionService() {
 
     private fun updateGain(slot: Slot) {
         slot.gain.gain =
-            if (settings.replayGain) ReplayGain.factor(slot.gainTag, slot.peakTag) else 1f
+            if (settings.replayGain && !settings.bitPerfect)
+                ReplayGain.factor(slot.gainTag, slot.peakTag)
+            else 1f
     }
 
     private fun media(t: Track) =
@@ -907,53 +1039,131 @@ class PlaybackService : MediaSessionService() {
             )
             .build()
 
-    private fun rebuild(play: Boolean, position: Long = 0) {
+    private inline fun withSyncing(block: () -> Unit) {
         syncing = true
         try {
+            block()
+        } finally {
+            syncing = false
+        }
+    }
+
+    private fun mediaItemsFor(entries: List<QueueEntry>): List<MediaItem> =
+        entries.mapNotNull { tracks[it.trackId]?.let(::media) }
+
+    private fun rebuild(play: Boolean, position: Long = 0) {
+        withSyncing {
             if (player.currentMediaItem?.mediaId != queue.state.current?.trackId?.toString()) {
                 active.gainTag = null
                 active.peakTag = null
                 active.gain.gain = 1f
             }
-            player.setMediaItems(
-                queue.state.entries.map { media(tracks.getValue(it.trackId)) },
-                queue.state.index,
-                position,
-            )
+            val items = mediaItemsFor(queue.state.entries)
+            if (items.isEmpty()) {
+                player.stop()
+                player.clearMediaItems()
+                return
+            }
+            val safeIndex = queue.state.index.coerceIn(0, items.lastIndex)
+            player.setMediaItems(items, safeIndex, position)
             player.repeatMode =
                 if (queue.state.repeat == RepeatMode.ONE) Player.REPEAT_MODE_ONE
                 else Player.REPEAT_MODE_OFF
             player.shuffleModeEnabled = false
-            player.setPlaybackSpeed(settings.speed)
+            player.setPlaybackSpeed(effectiveSpeed)
             player.prepare()
             player.playWhenReady = play
-        } finally {
-            syncing = false
         }
         extendQueue()
+    }
+
+    private fun reorderQueue() {
+        val current = queue.state.current ?: return
+        if (player.currentMediaItem?.mediaId != current.trackId.toString()) {
+            rebuild(player.playWhenReady, player.currentPosition)
+            return
+        }
+        withSyncing {
+            val index = player.currentMediaItemIndex
+            player.removeMediaItems(index + 1, player.mediaItemCount)
+            player.removeMediaItems(0, index)
+            player.addMediaItems(0, mediaItemsFor(queue.state.entries.take(queue.state.index)))
+            player.addMediaItems(mediaItemsFor(queue.state.entries.drop(queue.state.index + 1)))
+        }
+        extendQueue()
+    }
+
+    private fun restartAudioOutput() {
+        if (queue.state.current?.trackId !in tracks) return
+        val position = player.currentPosition
+        val play = player.playWhenReady
+        cancelFade()
+        tick()
+        val old = active
+        active = createSlot(true)
+        session.setPlayer(player)
+        releaseSlot(old)
+        applyAudioPolicy()
+        rebuild(play, position)
+    }
+
+    private fun attachAudioTrack(slot: Slot, audioTrack: android.media.AudioTrack) {
+        if (slot.released || destroying) return
+        val listener =
+            android.media.AudioRouting.OnRoutingChangedListener {
+                if (::active.isInitialized && slot === active && !slot.released && !destroying)
+                    updateRoute()
+            }
+        attempt { audioTrack.addOnRoutingChangedListener(listener, android.os.Handler(mainLooper)) }
+        scope.launch {
+            if (slot.released || destroying) {
+                attempt { audioTrack.removeOnRoutingChangedListener(listener) }
+                return@launch
+            }
+            slot.audioTrack?.let { old ->
+                slot.routingListener?.let { attempt { old.removeOnRoutingChangedListener(it) } }
+            }
+            slot.audioTrack = audioTrack
+            slot.routingListener = listener
+            if (::active.isInitialized && slot === active) updateRoute()
+        }
+    }
+
+    private fun detachAudioTrack(slot: Slot, audioTrack: android.media.AudioTrack) {
+        scope.launch {
+            if (slot.audioTrack === audioTrack) {
+                slot.routingListener?.let {
+                    attempt { audioTrack.removeOnRoutingChangedListener(it) }
+                }
+                slot.routingListener = null
+                slot.audioTrack = null
+            }
+        }
     }
 
     private fun extendQueue() {
         val playedManual = queue.removePlayedManualEntries()
         if (playedManual.isNotEmpty()) {
-            syncing = true
-            playedManual.asReversed().forEach { player.removeMediaItem(it) }
-            syncing = false
+            withSyncing {
+                playedManual.asReversed().forEach { index ->
+                    if (index in 0 until player.mediaItemCount) player.removeMediaItem(index)
+                }
+            }
         }
         val appended = queue.appendCycleIfNeeded()
-        if (appended.isNotEmpty())
-            player.addMediaItems(appended.map { media(tracks.getValue(it.trackId)) })
+        if (appended.isNotEmpty()) player.addMediaItems(mediaItemsFor(appended))
         val remove = queue.trimHistory()
         if (remove > 0) {
-            syncing = true
-            player.removeMediaItems(0, remove)
-            syncing = false
+            withSyncing {
+                val safeRemove = remove.coerceAtMost(player.mediaItemCount)
+                if (safeRemove > 0) player.removeMediaItems(0, safeRemove)
+            }
         }
     }
 
     private fun prepareFade() {
         if (
-            settings.crossfadeSeconds <= 0 ||
+            effectiveFade <= 0 ||
                 queue.state.repeat == RepeatMode.ONE ||
                 queue.state.index + 1 >= queue.state.entries.size
         )
@@ -963,40 +1173,35 @@ class PlaybackService : MediaSessionService() {
                 !PlaybackPowerPolicy.prepareIncoming(
                     player.isPlaying,
                     player.duration - player.currentPosition,
-                    PlaybackPowerPolicy.fadeWindow(
-                        settings.crossfadeSeconds,
-                        player.duration,
-                        settings.speed,
-                    ),
-                    settings.speed,
+                    PlaybackPowerPolicy.fadeWindow(effectiveFade, player.duration, effectiveSpeed),
+                    effectiveSpeed,
                 )
         )
             return
 
+        val items = mediaItemsFor(queue.state.entries)
+        val nextIndex = queue.state.index + 1
+        if (nextIndex !in items.indices) return
         incomingPrepared = true
         spare =
             createSlot(false).also { slot ->
                 slot.player.volume = 0f
-                slot.player.setPlaybackSpeed(settings.speed)
-                slot.player.setMediaItems(
-                    queue.state.entries.map { media(tracks.getValue(it.trackId)) },
-                    queue.state.index + 1,
-                    0,
-                )
+                slot.player.setPlaybackSpeed(effectiveSpeed)
+                slot.player.setMediaItems(items, nextIndex, 0)
                 slot.player.prepare()
             }
     }
 
     private fun updateFade() {
-        if (settings.crossfadeSeconds <= 0 || !player.isPlaying || player.duration <= 0) return
+        if (effectiveFade <= 0 || !player.isPlaying || player.duration <= 0) return
         val next = spare ?: return
         val fadeMs =
             minOf(
-                settings.crossfadeSeconds * 1000L,
-                (player.duration / settings.speed / 2).toLong().coerceAtLeast(1),
+                effectiveFade * 1000L,
+                (player.duration / effectiveSpeed / 2).toLong().coerceAtLeast(1),
             )
         val fraction =
-            Crossfade.fraction(player.duration - player.currentPosition, settings.speed, fadeMs)
+            Crossfade.fraction(player.duration - player.currentPosition, effectiveSpeed, fadeMs)
         if (fraction <= 0f || next.player.playbackState != Player.STATE_READY) return
         if (fadeListen == null) {
             fadeListen = newListen(queue.state.entries.getOrNull(queue.state.index + 1)?.trackId)
@@ -1020,18 +1225,19 @@ class PlaybackService : MediaSessionService() {
         fadeListen = null
         fadeFraction = 0f
 
-        syncing = true
-        session.setPlayer(player)
-        old.player.pause()
-        releaseSlot(old)
-        player.setAudioAttributes(audioAttributes, true)
-        player.setHandleAudioBecomingNoisy(settings.pauseOnDisconnect)
-        player.volume = 1f
-        player.repeatMode = Player.REPEAT_MODE_OFF
-        syncing = false
+        withSyncing {
+            session.setPlayer(player)
+            player.setAudioAttributes(audioAttributes, true)
+            player.setHandleAudioBecomingNoisy(settings.pauseOnDisconnect)
+            player.volume = 1f
+            player.repeatMode = Player.REPEAT_MODE_OFF
+            old.player.pause()
+            releaseSlot(old)
+        }
         updateRoute()
         applyAudioPolicy()
-        queue.setIndex(player.currentMediaItemIndex)
+        if (player.currentMediaItemIndex in queue.state.entries.indices)
+            queue.setIndex(player.currentMediaItemIndex)
         previousTick = SystemClock.elapsedRealtime()
         wasPlaying = player.isPlaying
         extendQueue()
@@ -1053,14 +1259,15 @@ class PlaybackService : MediaSessionService() {
         player.volume = 1f
     }
 
-    private fun newListen(id: Long?): ListeningSession? = id?.let {
-        ListeningSession(
-            it,
-            tracks[it]?.durationMs ?: 0,
-            System.currentTimeMillis(),
-            UUID.randomUUID().toString(),
-        )
-    }
+    private fun newListen(id: Long?): ListeningSession? =
+        id?.let {
+            ListeningSession(
+                it,
+                tracks[it]?.durationMs ?: 0,
+                System.currentTimeMillis(),
+                UUID.randomUUID().toString(),
+            )
+        }
 
     private fun beginListen() {
         listen = newListen(queue.state.current?.trackId)
@@ -1121,8 +1328,17 @@ class PlaybackService : MediaSessionService() {
         saves.trySend(queue.state to journal.revisions)
     }
 
+    private fun alignQueueWithPlayer() {
+        if (!::active.isInitialized || syncing) return
+        val index = player.currentMediaItemIndex
+        val id = player.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        if (queue.state.entries.getOrNull(index)?.trackId == id && queue.state.index != index)
+            queue.setIndex(index)
+    }
+
     private fun publish() {
         if (!::active.isInitialized) return
+        alignQueueWithPlayer()
         wakeups.trySend(Unit)
         app.playback.publish(
             PlaybackState(
@@ -1139,6 +1355,8 @@ class PlaybackService : MediaSessionService() {
                 deviceKey,
                 deviceName,
                 journal.revisions,
+                bitPerfect = usb.state(),
+                speed = effectiveSpeed,
             )
         )
     }
@@ -1146,8 +1364,9 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     private fun releaseSlot(slot: Slot) {
+        slot.released = true
         slot.audioTrack?.let { track ->
-            slot.routingListener?.let { track.removeOnRoutingChangedListener(it) }
+            slot.routingListener?.let { attempt { track.removeOnRoutingChangedListener(it) } }
         }
         slot.routingListener = null
         slot.audioTrack = null
@@ -1177,11 +1396,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        destroying = true
+        app.playback.publish(app.playback.state.value.copy(playing = false, loading = false))
         flushListen()
         save()
         audioManager.unregisterAudioDeviceCallback(deviceCallback)
         spare?.let(::releaseSlot)
         releaseSlot(active)
+        usb.close()
         session.release()
         saves.close()
         listenWrites.close()

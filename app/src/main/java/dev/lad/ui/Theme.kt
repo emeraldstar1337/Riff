@@ -43,7 +43,11 @@ fun LadTheme(settings: Settings, content: @Composable () -> Unit) {
                 surfaceContainerLow = Color.Black,
             )
         else styled
-    CompositionLocalProvider(LocalLadSettings provides settings) {
+    val textResources = dev.lad.i18n.rememberLocalizedText()
+    CompositionLocalProvider(
+        LocalLadSettings provides settings,
+        dev.lad.i18n.LocalTextResources provides textResources,
+    ) {
         MaterialExpressiveTheme(
             colorScheme = scheme,
             typography = LadTypography,

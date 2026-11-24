@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+
 package dev.lad.ui
 
 import androidx.compose.animation.core.CubicBezierEasing
@@ -5,9 +7,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Typography
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.lad.R
 
 object LadSpacing {
     val micro = 4.dp
@@ -60,10 +65,34 @@ object LadElevation {
     val flat = 0.dp
 }
 
+val RiffFont =
+    FontFamily(
+        listOf(100, 200, 300, 400, 500, 600, 700, 800, 900).map {
+            Font(
+                R.font.google_sans,
+                FontWeight(it),
+                variationSettings =
+                    androidx.compose.ui.text.font.FontVariation.Settings(
+                        androidx.compose.ui.text.font.FontVariation.weight(it)
+                    ),
+            )
+        }
+    )
+
 val LadTypography =
     Typography(
+        displayLarge = TextStyle(fontFamily = RiffFont, fontSize = 57.sp, lineHeight = 64.sp),
+        displayMedium = TextStyle(fontFamily = RiffFont, fontSize = 45.sp, lineHeight = 52.sp),
+        titleSmall =
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Medium,
+            ),
         displaySmall =
             TextStyle(
+                fontFamily = RiffFont,
                 fontSize = 36.sp,
                 lineHeight = 40.sp,
                 fontWeight = FontWeight.Black,
@@ -71,26 +100,62 @@ val LadTypography =
             ),
         headlineLarge =
             TextStyle(
+                fontFamily = RiffFont,
                 fontSize = 30.sp,
                 lineHeight = 35.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-.6).sp,
             ),
         headlineMedium =
-            TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 26.sp,
+                lineHeight = 32.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         headlineSmall =
-            TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 22.sp,
+                lineHeight = 28.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         titleLarge =
-            TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 22.sp,
+                lineHeight = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
         titleMedium =
-            TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-        bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-        bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-        bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        bodyLarge = TextStyle(fontFamily = RiffFont, fontSize = 16.sp, lineHeight = 24.sp),
+        bodyMedium = TextStyle(fontFamily = RiffFont, fontSize = 14.sp, lineHeight = 20.sp),
+        bodySmall = TextStyle(fontFamily = RiffFont, fontSize = 12.sp, lineHeight = 16.sp),
         labelLarge =
-            TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+            ),
         labelMedium =
-            TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+            ),
         labelSmall =
-            TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+            TextStyle(
+                fontFamily = RiffFont,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+            ),
     )

@@ -13,6 +13,8 @@ import dev.lad.domain.QueueSnapshot
 import dev.lad.i18n.AppLanguage
 import dev.lad.i18n.TextResources
 import dev.lad.util.attempt
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -31,6 +33,9 @@ data class PlaybackState(
     val deviceName: String = "Phone speaker",
     val queueHistory: List<dev.lad.domain.QueueRevision> = emptyList(),
     val positionTimestampMs: Long = android.os.SystemClock.elapsedRealtime(),
+    val bitPerfect: dev.lad.domain.BitPerfectState = dev.lad.domain.BitPerfectState(),
+    val speed: Float = 1f,
+    val artworkDirection: Int = 1,
 )
 
 class PlaybackRepository(private val context: Context) {
@@ -44,6 +49,17 @@ class PlaybackRepository(private val context: Context) {
     val lyricsVisible = MutableStateFlow(false)
     val lyricsDeadline = MutableStateFlow(Long.MAX_VALUE)
     val systemSaving = MutableStateFlow(false)
+
+    private val startedActivities = AtomicInteger(0)
+
+    fun onActivityStarted() {
+        uiVisible.value = startedActivities.incrementAndGet() > 0
+    }
+
+    fun onActivityStopped() {
+        val remaining = startedActivities.updateAndGet { (it - 1).coerceAtLeast(0) }
+        uiVisible.value = remaining > 0
+    }
 
     fun restoreQueue(id: Long) = command("restoreQueue") { putLong("revision", id) }
 
@@ -62,7 +78,20 @@ class PlaybackRepository(private val context: Context) {
     }
 
     internal fun publish(state: PlaybackState) {
-        mutable.value = state
+        val previous = mutable.value
+        val changed = previous.current?.id != state.current?.id
+        val direction =
+            if (changed) {
+                val oldIndex = previous.queue.index
+                val sameTimeline =
+                    state.queue.entries.take(previous.queue.entries.size) == previous.queue.entries
+                val newIndex =
+                    if (sameTimeline) state.queue.index
+                    else previous.queue.entries.indexOf(state.queue.current)
+                if (newIndex >= 0 && newIndex < oldIndex) -1 else 1
+            } else previous.artworkDirection
+        mutable.value = state.copy(artworkDirection = direction)
+        dev.lad.widget.RiffWidget.changed(context, state)
     }
 
     fun connect() {
@@ -133,6 +162,23 @@ class PlaybackRepository(private val context: Context) {
         }
     }
 
+    suspend fun awaitCommand(action: String, configure: Bundle.() -> Unit = {}) {
+        val done = CompletableDeferred<Unit>()
+        val executor = ContextCompat.getMainExecutor(context)
+        withController { controller ->
+            val resultFuture =
+                controller.sendCustomCommand(
+                    SessionCommand(COMMAND, Bundle.EMPTY),
+                    Bundle().apply {
+                        putString("action", action)
+                        configure()
+                    },
+                )
+            resultFuture.addListener({ done.complete(Unit) }, executor)
+        }
+        done.await()
+    }
+
     fun start(ids: List<Long>, selected: Long, shuffle: Boolean, contextName: String) =
         command("start") {
             putLongArray("ids", ids.toLongArray())
@@ -141,24 +187,21 @@ class PlaybackRepository(private val context: Context) {
             putString("context", contextName)
         }
 
+    fun jump(index: Int) =
+        command("jump") {
+            putInt("index", index)
+            putLong("id", state.value.queue.entries.getOrNull(index)?.trackId ?: -1)
+        }
+
     fun select(id: Long) = command("insert") { putLong("id", id) }
 
-    fun toggle() = withController {
-        if (it.playWhenReady) it.pause()
-        else if (it.playbackState == androidx.media3.common.Player.STATE_ENDED) command("restart")
-        else {
-            if (it.playbackState == androidx.media3.common.Player.STATE_IDLE) it.prepare()
-            it.play()
-        }
-    }
+    fun toggle() = command("toggle")
 
-    fun next() = withController { it.seekToNextMediaItem() }
+    fun next() = command("next")
 
-    fun previous() = withController {
-        if (it.currentPosition > 3000) it.seekTo(0) else it.seekToPreviousMediaItem()
-    }
+    fun previous() = command("previous")
 
-    fun seek(ms: Long) = withController { it.seekTo(ms) }
+    fun seek(ms: Long) = withController { it.seekTo(ms.coerceAtLeast(0)) }
 
     fun shuffle(enabled: Boolean) = command("shuffle") { putBoolean("enabled", enabled) }
 

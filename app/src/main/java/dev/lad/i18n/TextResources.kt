@@ -1,9 +1,11 @@
 package dev.lad.i18n
 
 import android.content.Context
+import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
@@ -12,11 +14,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.lad.R
 import dev.lad.domain.FolderRules
 
+val LocalTextResources = compositionLocalOf<TextResources?> { null }
+
 @Immutable
 class TextResources(private val context: Context) : TextProvider {
     override fun format(@StringRes id: Int, vararg arguments: Any?): String =
         if (arguments.isEmpty()) context.getString(id)
         else context.getString(id, *arguments.map { it ?: "—" }.toTypedArray())
+
+    override fun plural(@PluralsRes id: Int, quantity: Number, vararg arguments: Any?): String {
+        val safeQuantity = quantity.toLong().coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
+        return if (arguments.isEmpty()) context.resources.getQuantityString(id, safeQuantity)
+        else
+            context.resources.getQuantityString(
+                id,
+                safeQuantity,
+                *arguments.map { it ?: "—" }.toTypedArray(),
+            )
+    }
 
     fun label(value: String): String = aliases()[value]?.let { this[it] } ?: value
 
@@ -31,20 +46,21 @@ class TextResources(private val context: Context) : TextProvider {
         )
 
     private fun aliases(): Map<String, Int> =
-        synchronized(aliasIds) {
-            aliasCache
-                ?: run {
-                    val ru = AppLanguage.context(context.applicationContext, "ru")
-                    val en = AppLanguage.context(context.applicationContext, "en")
-                    buildMap {
-                        aliasIds.forEach { id ->
-                            put(ru.getString(id), id)
-                            put(en.getString(id), id)
-                        }
+        aliasCache
+            ?: synchronized(aliasIds) {
+                aliasCache
+                    ?: run {
+                        val ru = AppLanguage.context(context.applicationContext, "ru")
+                        val en = AppLanguage.context(context.applicationContext, "en")
+                        buildMap {
+                                aliasIds.forEach { id ->
+                                    put(ru.getString(id), id)
+                                    put(en.getString(id), id)
+                                }
+                            }
+                            .also { aliasCache = it }
                     }
-                        .also { aliasCache = it }
-                }
-        }
+            }
 
     companion object {
         @Volatile private var aliasCache: Map<String, Int>? = null
@@ -97,7 +113,7 @@ class TextResources(private val context: Context) : TextProvider {
 }
 
 @Composable
-fun rememberText(): TextResources {
+fun rememberLocalizedText(): TextResources {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val language by AppLanguage.selected.collectAsStateWithLifecycle()
@@ -105,3 +121,6 @@ fun rememberText(): TextResources {
         TextResources(AppLanguage.context(context, language))
     }
 }
+
+@Composable
+fun rememberText(): TextResources = LocalTextResources.current ?: rememberLocalizedText()

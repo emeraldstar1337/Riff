@@ -11,6 +11,7 @@ Dependency licenses apply separately from Riff's MIT license.
 | OkHttp and Okio | Apache 2.0 — [OkHttp](https://github.com/square/okhttp), [Okio](https://github.com/square/okio) |
 | Guava | Apache 2.0 — [Guava](https://github.com/google/guava) |
 | Jaudiotagger 3.0.1 | LGPL — [Jaudiotagger](https://bitbucket.org/ijabz/jaudiotagger/) |
+| Google Sans | SIL Open Font License 1.1 — [Google Fonts](https://github.com/googlefonts/googlesans), [`GoogleSans-OFL.txt`](app/src/main/assets/licenses/GoogleSans-OFL.txt) |
 
 Jaudiotagger is used without source changes. Riff source and build configuration are provided so it can be rebuilt with a modified or replacement dependency. Refer to the dependency's source and license for its redistribution terms.
 

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <plurals name="tracks">
+        <item quantity="one">%1$s track</item>
+        <item quantity="other">%1$s tracks</item>
+    </plurals>
+    <plurals name="album_tracks">
+        <item quantity="one">ALBUM · %1$s TRACK%2$s</item>
+        <item quantity="other">ALBUM · %1$s TRACKS%2$s</item>
+    </plurals>
+    <plurals name="library_screens_tracks_205">
+        <item quantity="one">%1$s track · %2$s</item>
+        <item quantity="other">%1$s tracks · %2$s</item>
+    </plurals>
+    <plurals name="playlist_tracks">
+        <item quantity="one">Playlist • %1$s track</item>
+        <item quantity="other">Playlist • %1$s tracks</item>
+    </plurals>
+    <plurals name="playlist_screens_tracks">
+        <item quantity="one">%1$s track • %2$s</item>
+        <item quantity="other">%1$s tracks • %2$s</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">In %1$s minute</item>
+        <item quantity="other">In %1$s minutes</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%1$s hour</item>
+        <item quantity="other">%1$s hours</item>
+    </plurals>
+    <plurals name="artists_in_your_history">
+        <item quantity="one">%1$s artist in your history</item>
+        <item quantity="other">%1$s artists in your history</item>
+    </plurals>
+    <plurals name="minutes_with_your_top_album_your">
+        <item quantity="one">%1$s minute with your top album · your ranking is below</item>
+        <item quantity="other">%1$s minutes with your top album · your ranking is below</item>
+    </plurals>
+    <plurals name="identical_files">
+        <item quantity="one">%1$s identical file</item>
+        <item quantity="other">%1$s identical files</item>
+    </plurals>
+    <plurals name="unavailable_files">
+        <item quantity="one">%1$s file is currently unavailable</item>
+        <item quantity="other">%1$s files are currently unavailable</item>
+    </plurals>
+    <plurals name="statistics_screens_plays">
+        <item quantity="one">%1$s · %2$s play</item>
+        <item quantity="other">%1$s · %2$s plays</item>
+    </plurals>
+    <plurals name="your_most_musical_day_minutes">
+        <item quantity="one">Your most musical day: %1$s · %2$s minute</item>
+        <item quantity="other">Your most musical day: %1$s · %2$s minutes</item>
+    </plurals>
+    <plurals name="statistics_screens_hours" tools:ignore="ImpliedQuantity">
+        <item quantity="one">hour</item>
+        <item quantity="other">hours</item>
+    </plurals>
+    <plurals name="statistics_screens_minutes" tools:ignore="ImpliedQuantity">
+        <item quantity="one">minute</item>
+        <item quantity="other">minutes</item>
+    </plurals>
+    <plurals name="plays" tools:ignore="ImpliedQuantity">
+        <item quantity="one">play</item>
+        <item quantity="other">plays</item>
+    </plurals>
+    <plurals name="different_tracks" tools:ignore="ImpliedQuantity">
+        <item quantity="one">different track</item>
+        <item quantity="other">different tracks</item>
+    </plurals>
+    <plurals name="play_count">
+        <item quantity="one">%1$s play</item>
+        <item quantity="other">%1$s plays</item>
+    </plurals>
+    <plurals name="artist_count">
+        <item quantity="one">%1$s artist</item>
+        <item quantity="other">%1$s artists</item>
+    </plurals>
+    <plurals name="different_track_count">
+        <item quantity="one">%1$s different track</item>
+        <item quantity="other">%1$s different tracks</item>
+    </plurals>
+    <plurals name="music_minutes_label" tools:ignore="ImpliedQuantity">
+        <item quantity="one">minute of music</item>
+        <item quantity="other">minutes of music</item>
+    </plurals>
+</resources>

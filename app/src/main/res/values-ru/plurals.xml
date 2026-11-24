@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <plurals name="tracks">
+        <item quantity="one">%1$s трек</item>
+        <item quantity="few">%1$s трека</item>
+        <item quantity="many">%1$s треков</item>
+        <item quantity="other">%1$s треков</item>
+    </plurals>
+    <plurals name="album_tracks">
+        <item quantity="one">АЛЬБОМ · %1$s ТРЕК%2$s</item>
+        <item quantity="few">АЛЬБОМ · %1$s ТРЕКА%2$s</item>
+        <item quantity="many">АЛЬБОМ · %1$s ТРЕКОВ%2$s</item>
+        <item quantity="other">АЛЬБОМ · %1$s ТРЕКОВ%2$s</item>
+    </plurals>
+    <plurals name="library_screens_tracks_205">
+        <item quantity="one">%1$s трек · %2$s</item>
+        <item quantity="few">%1$s трека · %2$s</item>
+        <item quantity="many">%1$s треков · %2$s</item>
+        <item quantity="other">%1$s треков · %2$s</item>
+    </plurals>
+    <plurals name="playlist_tracks">
+        <item quantity="one">Плейлист • %1$s трек</item>
+        <item quantity="few">Плейлист • %1$s трека</item>
+        <item quantity="many">Плейлист • %1$s треков</item>
+        <item quantity="other">Плейлист • %1$s треков</item>
+    </plurals>
+    <plurals name="playlist_screens_tracks">
+        <item quantity="one">%1$s трек • %2$s</item>
+        <item quantity="few">%1$s трека • %2$s</item>
+        <item quantity="many">%1$s треков • %2$s</item>
+        <item quantity="other">%1$s треков • %2$s</item>
+    </plurals>
+    <plurals name="minutes">
+        <item quantity="one">Через %1$s минуту</item>
+        <item quantity="few">Через %1$s минуты</item>
+        <item quantity="many">Через %1$s минут</item>
+        <item quantity="other">Через %1$s минут</item>
+    </plurals>
+    <plurals name="hours">
+        <item quantity="one">%1$s час</item>
+        <item quantity="few">%1$s часа</item>
+        <item quantity="many">%1$s часов</item>
+        <item quantity="other">%1$s часов</item>
+    </plurals>
+    <plurals name="artists_in_your_history">
+        <item quantity="one">%1$s исполнитель в твоей истории</item>
+        <item quantity="few">%1$s исполнителя в твоей истории</item>
+        <item quantity="many">%1$s исполнителей в твоей истории</item>
+        <item quantity="other">%1$s исполнителей в твоей истории</item>
+    </plurals>
+    <plurals name="minutes_with_your_top_album_your">
+        <item quantity="one">%1$s минута с альбомом-победителем · твой топ ниже</item>
+        <item quantity="few">%1$s минуты с альбомом-победителем · твой топ ниже</item>
+        <item quantity="many">%1$s минут с альбомом-победителем · твой топ ниже</item>
+        <item quantity="other">%1$s минут с альбомом-победителем · твой топ ниже</item>
+    </plurals>
+    <plurals name="identical_files">
+        <item quantity="one">%1$s одинаковый файл</item>
+        <item quantity="few">%1$s одинаковых файла</item>
+        <item quantity="many">%1$s одинаковых файлов</item>
+        <item quantity="other">%1$s одинаковых файлов</item>
+    </plurals>
+    <plurals name="unavailable_files">
+        <item quantity="one">%1$s файл сейчас недоступен</item>
+        <item quantity="few">%1$s файла сейчас недоступны</item>
+        <item quantity="many">%1$s файлов сейчас недоступны</item>
+        <item quantity="other">%1$s файлов сейчас недоступны</item>
+    </plurals>
+    <plurals name="statistics_screens_plays">
+        <item quantity="one">%1$s · %2$s прослушивание</item>
+        <item quantity="few">%1$s · %2$s прослушивания</item>
+        <item quantity="many">%1$s · %2$s прослушиваний</item>
+        <item quantity="other">%1$s · %2$s прослушиваний</item>
+    </plurals>
+    <plurals name="your_most_musical_day_minutes">
+        <item quantity="one">Самый музыкальный день: %1$s · %2$s минута</item>
+        <item quantity="few">Самый музыкальный день: %1$s · %2$s минуты</item>
+        <item quantity="many">Самый музыкальный день: %1$s · %2$s минут</item>
+        <item quantity="other">Самый музыкальный день: %1$s · %2$s минут</item>
+    </plurals>
+    <plurals name="statistics_screens_hours" tools:ignore="ImpliedQuantity">
+        <item quantity="one">час</item>
+        <item quantity="few">часа</item>
+        <item quantity="many">часов</item>
+        <item quantity="other">часов</item>
+    </plurals>
+    <plurals name="statistics_screens_minutes" tools:ignore="ImpliedQuantity">
+        <item quantity="one">минута</item>
+        <item quantity="few">минуты</item>
+        <item quantity="many">минут</item>
+        <item quantity="other">минут</item>
+    </plurals>
+    <plurals name="plays" tools:ignore="ImpliedQuantity">
+        <item quantity="one">прослушивание</item>
+        <item quantity="few">прослушивания</item>
+        <item quantity="many">прослушиваний</item>
+        <item quantity="other">прослушиваний</item>
+    </plurals>
+    <plurals name="different_tracks" tools:ignore="ImpliedQuantity">
+        <item quantity="one">разный трек</item>
+        <item quantity="few">разных трека</item>
+        <item quantity="many">разных треков</item>
+        <item quantity="other">разных треков</item>
+    </plurals>
+    <plurals name="play_count">
+        <item quantity="one">%1$s прослушивание</item>
+        <item quantity="few">%1$s прослушивания</item>
+        <item quantity="many">%1$s прослушиваний</item>
+        <item quantity="other">%1$s прослушиваний</item>
+    </plurals>
+    <plurals name="artist_count">
+        <item quantity="one">%1$s исполнитель</item>
+        <item quantity="few">%1$s исполнителя</item>
+        <item quantity="many">%1$s исполнителей</item>
+        <item quantity="other">%1$s исполнителей</item>
+    </plurals>
+    <plurals name="different_track_count">
+        <item quantity="one">%1$s разный трек</item>
+        <item quantity="few">%1$s разных трека</item>
+        <item quantity="many">%1$s разных треков</item>
+        <item quantity="other">%1$s разных треков</item>
+    </plurals>
+    <plurals name="music_minutes_label" tools:ignore="ImpliedQuantity">
+        <item quantity="one">минута музыки</item>
+        <item quantity="few">минуты музыки</item>
+        <item quantity="many">минут музыки</item>
+        <item quantity="other">минут музыки</item>
+    </plurals>
+</resources>

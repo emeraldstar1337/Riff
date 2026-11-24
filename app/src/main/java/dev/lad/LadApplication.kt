@@ -14,6 +14,11 @@ class LadApplication : Application(), coil.ImageLoaderFactory {
             .crossfade(false)
             .build()
 
+    val trackAppearance by lazy { TrackAppearance(this) }
+    val artistPhotos by lazy { ArtistPhotos(this) }
+    val lyrics by lazy { LyricsRepository(this, music.dao) }
+    val mediaTools by lazy { MediaTools(this) }
+
     val persistenceScope =
         kotlinx.coroutines.CoroutineScope(
             kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO

@@ -104,7 +104,7 @@ internal fun SeekBar(
             },
         thumb = {
             Box(
-                Modifier.size(if (bar) 4.dp else 20.dp, if (bar) 24.dp else 20.dp)
+                Modifier.size(if (bar) 4.dp else 12.dp, if (bar) 24.dp else 12.dp)
                     .background(active, if (bar) RoundedCornerShape(2.dp) else CircleShape)
             )
         },

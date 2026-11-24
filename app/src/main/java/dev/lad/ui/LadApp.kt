@@ -22,11 +22,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
 import dev.lad.R
 import dev.lad.data.*
+import dev.lad.domain.albumKey
 import dev.lad.i18n.rememberText
 import dev.lad.statistics.*
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -36,22 +40,22 @@ import kotlinx.coroutines.launch
 @Composable
 fun LadApp(vm: LadViewModel = viewModel()) {
     val strings = rememberText()
-    val storedSettings by vm.settings.collectAsStateWithLifecycle()
-    val tracks by vm.tracks.collectAsStateWithLifecycle()
-    val playlists by vm.playlists.collectAsStateWithLifecycle()
-    val history by vm.history.collectAsStateWithLifecycle()
-    val runs by vm.runs.collectAsStateWithLifecycle()
+    val storedSettings by vm.settingsState.settings.collectAsStateWithLifecycle()
+    val tracks by vm.libraryState.tracks.collectAsStateWithLifecycle()
+    val playlists by vm.playlistsState.playlists.collectAsStateWithLifecycle()
     val stablePlayback =
         remember(vm) {
-            vm.playback.state
+            vm.playerState.playback.state
                 .map { it.copy(positionMs = 0, positionTimestampMs = 0) }
                 .distinctUntilChanged()
         }
     val initialPlayback =
-        remember(vm) { vm.playback.state.value.copy(positionMs = 0, positionTimestampMs = 0) }
+        remember(vm) {
+            vm.playerState.playback.state.value.copy(positionMs = 0, positionTimestampMs = 0)
+        }
     val playback by stablePlayback.collectAsStateWithLifecycle(initialPlayback)
-    val visible by vm.playback.uiVisible.collectAsStateWithLifecycle()
-    val systemSaving by vm.playback.systemSaving.collectAsStateWithLifecycle()
+    val visible by vm.playerState.playback.uiVisible.collectAsStateWithLifecycle()
+    val systemSaving by vm.playerState.playback.systemSaving.collectAsStateWithLifecycle()
     val saving = systemSaving
     val settings =
         storedSettings.copy(
@@ -64,13 +68,26 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                 if (saving) minOf(0.35f, storedSettings.glowStrength)
                 else storedSettings.glowStrength,
         )
-    val scanning by vm.scanning.collectAsStateWithLifecycle()
-    val message by vm.message.collectAsStateWithLifecycle()
+    val scanning by vm.libraryState.scanning.collectAsStateWithLifecycle()
+    val message by vm.libraryState.message.collectAsStateWithLifecycle()
     val nav = rememberNavController()
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route ?: "home"
     var permitted by remember { mutableStateOf(vm.hasPermission()) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, vm) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val nowPermitted = vm.hasPermission()
+                val newlyGranted = !permitted && nowPermitted
+                permitted = nowPermitted
+                if (newlyGranted) vm.refresh(false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val request =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
             permitted = it
@@ -84,23 +101,27 @@ fun LadApp(vm: LadViewModel = viewModel()) {
     }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
     var addTrack by remember { mutableStateOf<Track?>(null) }
+    var artistName by rememberSaveable { mutableStateOf("") }
+    var artistIds by rememberSaveable { mutableStateOf(longArrayOf()) }
     var collectionName by rememberSaveable { mutableStateOf("") }
     var collectionIds by rememberSaveable { mutableStateOf(longArrayOf()) }
     val lookup = remember(tracks) { tracks.associateBy { it.id } }
     val collection =
-        collectionName to
-            (when (strings.label(collectionName)) {
-                strings[R.string.favourites] -> tracks.filter { it.favorite }
-                strings[R.string.recently_added] -> tracks.sortedByDescending { it.addedAt }
-                else ->
-                    if (collectionIds.isNotEmpty())
-                        collectionIds.asSequence().mapNotNull { lookup[it] }.toList()
-                    else
-                        tracks.filter {
-                            it.artist == collectionName ||
-                                "${it.album} • ${it.artist}" == collectionName
-                        }
-            })
+        remember(collectionName, collectionIds, tracks, lookup, strings) {
+            collectionName to
+                (when (strings.label(collectionName)) {
+                    strings[R.string.favourites] -> tracks.filter { it.favorite }
+                    strings[R.string.recently_added] -> tracks.sortedByDescending { it.addedAt }
+                    else ->
+                        if (collectionIds.isNotEmpty())
+                            collectionIds.asSequence().mapNotNull { lookup[it] }.toList()
+                        else
+                            tracks.filter {
+                                it.artist == collectionName ||
+                                    "${it.album} • ${it.artist}" == collectionName
+                            }
+                })
+        }
     var recap by remember { mutableStateOf<Triple<MusicStats, String, Boolean>?>(null) }
     BackHandler(enabled = recap != null) { recap = null }
     val snack = remember { SnackbarHostState() }
@@ -132,6 +153,11 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                 collectionIds = list.map { it.id }.toLongArray()
                 nav.navigate("collection")
             }
+            val showArtist: (String, List<Track>) -> Unit = { name, list ->
+                artistName = name
+                artistIds = list.map { it.id }.toLongArray()
+                nav.navigate("artist")
+            }
             Scaffold(
                 snackbarHost = { SnackbarHost(snack) },
                 topBar = {
@@ -150,6 +176,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                             strings.label(collection.first).ifBlank {
                                                 strings[R.string.music]
                                             }
+                                        "artist" -> artistName
                                         "duplicates" -> strings[R.string.duplicates]
                                         else -> strings[R.string.playlist]
                                     },
@@ -223,7 +250,6 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                             restoreState = true
                                         }
                                     },
-                                    onSearch = { nav.navigate("search") },
                                 )
                             else Spacer(Modifier.navigationBarsPadding())
                         }
@@ -268,10 +294,12 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                         modifier = Modifier.padding(padding),
                     ) {
                         composable("home") {
+                            val homeHistory by
+                                vm.statisticsState.history.collectAsStateWithLifecycle()
                             HomeScreen(
                                 tracks,
                                 playlists,
-                                history,
+                                homeHistory,
                                 playback.current?.id,
                                 vm,
                                 permitted,
@@ -300,6 +328,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                 permission,
                                 showCollection,
                                 add,
+                                onArtist = showArtist,
                             )
                         }
                         composable("playlists") {
@@ -311,9 +340,10 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                             )
                         }
                         composable("playlist/{id}") { e ->
-                            val p = playlists.firstOrNull {
-                                it.id == e.arguments?.getString("id")?.toLongOrNull()
-                            }
+                            val p =
+                                playlists.firstOrNull {
+                                    it.id == e.arguments?.getString("id")?.toLongOrNull()
+                                }
                             if (p != null)
                                 PlaylistScreen(
                                     p,
@@ -323,6 +353,24 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                     add,
                                     onDeleted = { nav.popBackStack() },
                                 )
+                        }
+                        composable("artist") {
+                            val rows = artistIds.asSequence().mapNotNull { lookup[it] }.toList()
+                            val albums =
+                                remember(rows, tracks) {
+                                    val keys = rows.map { it.albumKey() }.toSet()
+                                    tracks.filter { it.albumKey() in keys }
+                                }
+                            TrackListScreen(
+                                artistName,
+                                rows,
+                                playback.current?.id,
+                                vm,
+                                add,
+                                showCover = true,
+                                onAlbum = showCollection,
+                                albumTracks = albums,
+                            )
                         }
                         composable("collection") {
                             collection.let { (name, list) ->
@@ -337,10 +385,13 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                             }
                         }
                         composable("stats") {
+                            val statsHistory by
+                                vm.statisticsState.history.collectAsStateWithLifecycle()
+                            val statsRuns by vm.statisticsState.runs.collectAsStateWithLifecycle()
                             StatisticsScreen(
-                                history,
+                                statsHistory,
                                 tracks,
-                                runs = runs,
+                                runs = statsRuns,
                                 onRecap = { s, label, year -> recap = Triple(s, label, year) },
                             )
                         }
@@ -369,6 +420,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                 vm,
                                 showCollection,
                                 add,
+                                onArtist = showArtist,
                                 onPlaylist = { nav.navigate("playlist/$it") },
                             )
                         }
@@ -376,7 +428,8 @@ fun LadApp(vm: LadViewModel = viewModel()) {
             }
             if (!playerOpen) {
                 detail?.let {
-                    TrackDetailsPanel(it, history, vm) { vm.selectedDetails.value = null }
+                    val detailHistory by vm.statisticsState.history.collectAsStateWithLifecycle()
+                    TrackDetailsPanel(it, detailHistory, vm) { vm.selectedDetails.value = null }
                 }
                 if (audioOpen) AudioPanel(settings, playback, vm) { vm.audioOpen.value = false }
             }

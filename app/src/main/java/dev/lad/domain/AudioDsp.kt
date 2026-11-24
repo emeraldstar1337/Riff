@@ -18,8 +18,8 @@ class AudioDsp {
     private var headroom = 1f
 
     fun configure(sampleRate: Int, channelCount: Int) {
-        rate = sampleRate
-        channels = channelCount
+        rate = sampleRate.coerceAtLeast(1)
+        channels = channelCount.coerceAtLeast(1)
         applied = null
     }
 
@@ -29,24 +29,36 @@ class AudioDsp {
 
     private fun refresh() {
         val next = profile
-        if (next == applied) return
-        val frequencies = listOf(60.0, 230.0, 910.0, 3600.0, 14000.0)
-        filters =
-            Array(channels) {
-                Array(5) { band ->
-                    Biquad(
-                        frequencies[band].coerceAtMost(rate * .45),
-                        rate,
-                        if (next.enabled)
-                            next.bands.getOrElse(band) { 0f }.coerceIn(-12f, 12f).toDouble()
-                        else 0.0,
-                    )
+        val prev = applied
+        if (next == prev) return
+        val bandsChanged =
+            prev == null ||
+                filters.size != channels ||
+                prev.enabled != next.enabled ||
+                prev.bands != next.bands
+        if (bandsChanged) {
+            val frequencies = listOf(60.0, 230.0, 910.0, 3600.0, 14000.0)
+            filters =
+                Array(channels) {
+                    Array(5) { band ->
+                        val gain =
+                            next.bands
+                                .getOrElse(band) { 0f }
+                                .let { if (it.isFinite()) it.coerceIn(-12f, 12f).toDouble() else 0.0 }
+                        Biquad(
+                            frequencies[band].coerceAtMost(rate * .45),
+                            rate,
+                            if (next.enabled) gain else 0.0,
+                        )
+                    }
                 }
-            }
-        headroom =
-            if (next.enabled)
-                10.0.pow(-(next.bands.maxOrNull() ?: 0f).coerceAtLeast(0f) / 20.0).toFloat()
-            else 1f
+            val maxBand =
+                next.bands
+                    .mapNotNull { it.takeIf(Float::isFinite) }
+                    .maxOrNull()
+                    ?.coerceAtLeast(0f) ?: 0f
+            headroom = if (next.enabled) 10.0.pow(-maxBand / 20.0).toFloat() else 1f
+        }
         applied = next
     }
 
@@ -61,12 +73,14 @@ class AudioDsp {
 
     fun samplePrepared(value: Float, channel: Int): Float {
         val p = applied ?: profile
-        var output = value.toDouble()
-        if (p.enabled)
+        var output = if (value.isFinite()) value.toDouble() else 0.0
+        if (p.enabled && channel in filters.indices)
             filters[channel].forEachIndexed { band, filter ->
-                if (p.bands.getOrElse(band) { 0f } != 0f) output = filter.process(output)
+                val bandGain = p.bands.getOrElse(band) { 0f }
+                if (bandGain.isFinite() && bandGain != 0f) output = filter.process(output)
             }
-        val balance = p.balance.coerceIn(-1f, 1f)
+        val balance = if (p.balance.isFinite()) p.balance.coerceIn(-1f, 1f) else 0f
+        val volume = if (p.volume.isFinite()) p.volume.coerceIn(0f, 1f) else 1f
         val attenuation =
             if (channels < 2) 1f
             else
@@ -75,9 +89,8 @@ class AudioDsp {
                     1 -> if (balance < 0) 1f + balance else 1f
                     else -> 1f
                 }
-        return (output * headroom * p.volume.coerceIn(0f, 1f) * attenuation)
-            .toFloat()
-            .coerceIn(-1f, 1f)
+        val result = (output * headroom * volume * attenuation).toFloat()
+        return if (result.isFinite()) result.coerceIn(-1f, 1f) else 0f
     }
 
     private class Biquad(frequency: Double, sampleRate: Int, gain: Double) {

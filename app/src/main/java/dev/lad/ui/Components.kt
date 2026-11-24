@@ -1,9 +1,13 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
+import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,7 +18,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,29 +39,39 @@ fun duration(ms: Long): String {
 fun Artwork(uri: String?, title: String, modifier: Modifier = Modifier, round: Int = 24) {
     val strings = rememberText()
     var loaded by remember(uri) { mutableStateOf(false) }
+    val decoded = LocalReadyArtwork.current?.takeIf { it.uri == uri }?.drawable as? BitmapDrawable
     val style = LocalLadSettings.current
     val radius =
         when (style.coverShape) {
-            "square" -> 8
             "circle" -> 1000
             else -> round
         }
     Box(
         modifier.clip(
-            if (style.coverShape == "flower") FlowerShape else RoundedCornerShape(radius.dp)
+            if (LocalReadyArtwork.current != null && style.vinyl) CircleShape
+            else if (style.coverShape == "flower") FlowerShape else RoundedCornerShape(radius.dp)
         ),
         contentAlignment = Alignment.Center,
     ) {
-        if (!loaded) ArtworkPlaceholder()
-        if (!uri.isNullOrBlank())
-            AsyncImage(
-                model = uri,
-                contentDescription = strings.format(R.string.artwork, title),
-                modifier = Modifier.fillMaxSize(),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                onSuccess = { loaded = true },
-                onError = { loaded = false },
+        if (decoded != null)
+            Image(
+                decoded.bitmap.asImageBitmap(),
+                strings.format(R.string.artwork, title),
+                Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
             )
+        else {
+            if (!loaded) ArtworkPlaceholder()
+            if (LocalReadyArtwork.current == null && !uri.isNullOrBlank())
+                AsyncImage(
+                    model = uri,
+                    contentDescription = strings.format(R.string.artwork, title),
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    onSuccess = { loaded = true },
+                    onError = { loaded = false },
+                )
+        }
     }
 }
 
@@ -143,7 +159,13 @@ fun EmptyState(title: String, body: String, button: String? = null, onClick: () 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         button?.let {
-            Button(onClick = onClick, contentPadding = PaddingValues(24.dp, 16.dp)) { Text(it) }
+            Button(
+                onClick = onClick,
+                contentPadding = PaddingValues(24.dp, 16.dp),
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
+                Text(it)
+            }
         }
     }
 }
@@ -166,15 +188,10 @@ fun TrackRow(
     Row(
         modifier
             .fillMaxWidth()
-            .clip(LadShapes.selected)
-            .border(
-                1.dp,
-                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                LadShapes.selected,
-            )
+            .clip(LadShapes.card)
             .background(
-                if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                if (active) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerLow
             )
             .clickable(onClick = onClick)
             .padding(12.dp),
@@ -222,34 +239,40 @@ fun TrackRow(
                 IconButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.MoreVert, strings[R.string.track_actions])
                 }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(strings[R.string.track_information_and_tags]) },
-                        onClick = {
-                            menu = false
-                            details(track)
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
+                if (menu)
+                    ExpressiveActions(
+                        track.title,
+                        strings.metadata(track.artist),
+                        { menu = false },
+                        listOf(
+                            PlayerAction(
+                                strings[R.string.track_information_and_tags],
+                                strings[R.string.file_artwork_and_statistics],
+                                Icons.Default.Info,
+                            ) {
+                                menu = false
+                                details(track)
+                            },
+                            PlayerAction(
                                 if (track.favorite) strings[R.string.remove_from_favourites]
-                                else strings[R.string.add_to_favourites]
-                            )
-                        },
-                        onClick = {
-                            menu = false
-                            onFavorite()
-                        },
+                                else strings[R.string.add_to_favourites],
+                                "",
+                                if (track.favorite) Icons.Default.FavoriteBorder
+                                else Icons.Default.Favorite,
+                            ) {
+                                menu = false
+                                onFavorite()
+                            },
+                            PlayerAction(
+                                strings[R.string.add_to_playlist],
+                                "",
+                                Icons.AutoMirrored.Filled.PlaylistAdd,
+                            ) {
+                                menu = false
+                                onAdd()
+                            },
+                        ),
                     )
-                    DropdownMenuItem(
-                        text = { Text(strings[R.string.add_to_playlist]) },
-                        onClick = {
-                            menu = false
-                            onAdd()
-                        },
-                    )
-                }
             }
     }
 }

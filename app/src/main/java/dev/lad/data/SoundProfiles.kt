@@ -6,20 +6,26 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object SoundProfiles {
-    fun read(text: String, device: String): SoundProfile = attempt {
-        val item =
-            JSONObject(text).let {
-                it.optJSONObject(device) ?: it.optJSONObject(device.substringBefore('@'))
-            } ?: return@attempt SoundProfile()
-        val bands = item.optJSONArray("bands")
-        SoundProfile(
-            item.optBoolean("enabled"),
-            List(5) { bands?.optDouble(it, 0.0)?.toFloat()?.coerceIn(-12f, 12f) ?: 0f },
-            item.optDouble("balance", 0.0).toFloat().coerceIn(-1f, 1f),
-            item.optDouble("volume", 1.0).toFloat().coerceIn(0f, 1f),
-        )
-    }
-        .getOrDefault(SoundProfile())
+    private fun Double.finiteFloat(min: Float, max: Float, fallback: Float): Float =
+        if (isFinite()) toFloat().coerceIn(min, max) else fallback
+
+    fun read(text: String, device: String): SoundProfile =
+        attempt {
+                val item =
+                    JSONObject(text).let {
+                        it.optJSONObject(device) ?: it.optJSONObject(device.substringBefore('@'))
+                    } ?: return@attempt SoundProfile()
+                val bands = item.optJSONArray("bands")
+                SoundProfile(
+                    item.optBoolean("enabled"),
+                    List(5) {
+                        bands?.optDouble(it, 0.0)?.finiteFloat(-12f, 12f, 0f) ?: 0f
+                    },
+                    item.optDouble("balance", 0.0).finiteFloat(-1f, 1f, 0f),
+                    item.optDouble("volume", 1.0).finiteFloat(0f, 1f, 1f),
+                )
+            }
+            .getOrDefault(SoundProfile())
 
     fun write(text: String, device: String, profile: SoundProfile): String {
         val json = attempt { JSONObject(text) }.getOrDefault(JSONObject())

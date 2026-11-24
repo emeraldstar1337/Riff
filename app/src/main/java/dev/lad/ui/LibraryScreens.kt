@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import androidx.compose.foundation.*
@@ -79,8 +81,8 @@ fun HomeScreen(
             tracks.filter { it.albumKey() == featured.albumKey() }.sortedBy { it.trackNumber }
         }
     val seed = artworkSeed(featured.artwork, LocalLadSettings.current.artworkColor)
-    val palette =
-        seed?.let { coverScheme(it, MaterialTheme.colorScheme) } ?: MaterialTheme.colorScheme
+    val baseScheme = MaterialTheme.colorScheme
+    val palette = remember(seed, baseScheme) { seed?.let { coverScheme(it, baseScheme) } ?: baseScheme }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
@@ -94,7 +96,7 @@ fun HomeScreen(
                     color = palette.primary,
                 )
                 Text(
-                    strings.format(R.string.tracks, tracks.size),
+                    strings.plural(R.plurals.tracks, tracks.size, tracks.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -102,17 +104,12 @@ fun HomeScreen(
         }
         item {
             BitsReveal(key = featured.albumKey()) {
-                OutlinedCard(
+                Card(
                     onClick = { onCollection("${featured.album} • ${featured.artist}", album) },
                     shape = LadShapes.hero,
-                    border =
-                        BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                        ),
                     colors =
-                        CardDefaults.outlinedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
+                        CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                         ),
                 ) {
                     Column(Modifier.padding(12.dp)) {
@@ -130,8 +127,9 @@ fun HomeScreen(
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    strings.format(
-                                        R.string.album_tracks,
+                                    strings.plural(
+                                        R.plurals.album_tracks,
+                                        album.size,
                                         album.size,
                                         if (featured.year > 0) " · ${featured.year}" else "",
                                     ),
@@ -175,9 +173,10 @@ fun HomeScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val favoriteCount = tracks.count { it.favorite }
                 QuickCollection(
                     strings[R.string.favourites],
-                    strings.format(R.string.tracks, tracks.count { it.favorite }),
+                    strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
                     Icons.Default.Favorite,
                     Modifier.weight(1f),
                 ) {
@@ -263,12 +262,12 @@ fun HomeScreen(
             }
         }
         item {
-            OutlinedCard(
+            Card(
                 onClick = onDemo,
                 shape = LadShapes.card,
                 colors =
-                    CardDefaults.outlinedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                    CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ),
             ) {
                 Row(
@@ -308,14 +307,12 @@ private fun QuickCollection(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    OutlinedCard(
+    Card(
         onClick = onClick,
         modifier = modifier,
         shape = LadShapes.card,
         colors =
-            CardDefaults.outlinedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-            ),
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(16.dp),
@@ -342,27 +339,22 @@ fun LibraryScreen(
     onPermission: () -> Unit,
     onCollection: (String, List<Track>) -> Unit,
     onAdd: (Track) -> Unit,
+    onArtist: (String, List<Track>) -> Unit = onCollection,
 ) {
     val strings = rememberText()
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        SingleChoiceSegmentedButtonRow(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
-            listOf(
-                    strings[R.string.library_screens_tracks],
-                    strings[R.string.albums],
-                    strings[R.string.artists],
-                )
-                .forEachIndexed { i, name ->
-                    SegmentedButton(
-                        tab == i,
-                        { tab = i },
-                        shape = SegmentedButtonDefaults.itemShape(i, 3),
-                        label = { Text(name, maxLines = 1) },
-                        icon = {},
-                    )
-                }
+        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+            ChoiceChips(
+                tab.toString(),
+                listOf(
+                    "0" to strings[R.string.library_screens_tracks],
+                    "1" to strings[R.string.albums],
+                    "2" to strings[R.string.artists],
+                ),
+            ) {
+                tab = it.toInt()
+            }
         }
         if (!permitted)
             EmptyState(
@@ -386,7 +378,7 @@ fun LibraryScreen(
                 vm,
                 onAdd,
                 header = {
-                    OutlinedCard(
+                    Card(
                         onClick = {
                             onCollection(
                                 strings[R.string.favourites],
@@ -395,8 +387,8 @@ fun LibraryScreen(
                         },
                         shape = LadShapes.card,
                         colors =
-                            CardDefaults.outlinedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                             ),
                     ) {
                         Row(
@@ -422,8 +414,9 @@ fun LibraryScreen(
                                     strings[R.string.favourite_tracks],
                                     style = MaterialTheme.typography.titleLarge,
                                 )
+                                val favoriteCount = tracks.count { it.favorite }
                                 Text(
-                                    strings.format(R.string.tracks, tracks.count { it.favorite }),
+                                    strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -451,22 +444,22 @@ fun LibraryScreen(
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(
-                    groups,
-                    key = { it.key },
-                ) { group ->
+                items(groups, key = { it.key }) { group ->
                     val list = group.items
                     val first = list.first()
                     val name = group.name
                     val artist =
                         list.map { it.artist }.distinct().singleOrNull()
                             ?: strings[R.string.various_artists]
-                    OutlinedCard(
-                        onClick = { onCollection(if (tab == 1) "$name • $artist" else name, list) },
+                    Card(
+                        onClick = {
+                            if (tab == 1) onCollection("$name • $artist", list)
+                            else onArtist(name, list)
+                        },
                         shape = LadShapes.card,
                         colors =
-                            CardDefaults.outlinedCardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                             ),
                     ) {
                         Row(
@@ -474,12 +467,8 @@ fun LibraryScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Artwork(
-                                first.artwork,
-                                name,
-                                Modifier.size(76.dp),
-                                if (tab == 1) 18 else 1000,
-                            )
+                            if (tab == 1) Artwork(first.artwork, name, Modifier.size(76.dp), 18)
+                            else ArtistPortrait(name, list, Modifier.size(76.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     name,
@@ -495,7 +484,7 @@ fun LibraryScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    strings.format(R.string.tracks, list.size),
+                                    strings.plural(R.plurals.tracks, list.size, list.size),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -523,11 +512,18 @@ fun TrackListScreen(
     onAdd: (Track) -> Unit,
     showCover: Boolean = false,
     header: (@Composable () -> Unit)? = null,
+    onAlbum: ((String, List<Track>) -> Unit)? = null,
+    albumTracks: List<Track> = tracks,
 ) {
     val strings = rememberText()
     var sort by rememberSaveable(name) { mutableIntStateOf(0) }
     var menu by remember { mutableStateOf(false) }
-    val history by vm.history.collectAsStateWithLifecycle()
+    val historyFlow =
+        remember(sort, vm) {
+            if (sort == 5 || sort == 6) vm.statisticsState.history
+            else kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    val history by historyFlow.collectAsStateWithLifecycle(emptyList())
     val playCounts =
         remember(history) { history.filter { it.counted }.groupingBy { it.trackId }.eachCount() }
     val lastPlayed =
@@ -577,7 +573,15 @@ fun TrackListScreen(
                         .padding(horizontal = 18.dp, vertical = 20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Artwork(first.artwork, name, Modifier.fillMaxWidth(0.74f).aspectRatio(1f), 22)
+                    if (onAlbum != null)
+                        ArtistPortrait(name, albumTracks, Modifier.size(128.dp), openSource = true)
+                    else
+                        Artwork(
+                            first.artwork,
+                            name,
+                            Modifier.fillMaxWidth(0.74f).aspectRatio(1f),
+                            22,
+                        )
                     Spacer(Modifier.height(20.dp))
                     Text(
                         name.substringBefore(" • "),
@@ -586,17 +590,19 @@ fun TrackListScreen(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (onAlbum == null)
+                        Text(
+                            sorted.map { it.artist }.distinct().take(4).joinToString(", "),
+                            Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     Text(
-                        sorted.map { it.artist }.distinct().take(4).joinToString(", "),
-                        Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        strings.format(
-                            R.string.library_screens_tracks_205,
+                        strings.plural(
+                            R.plurals.library_screens_tracks_205,
+                            sorted.size,
                             sorted.size,
                             duration(sorted.sumOf { it.durationMs }),
                         ),
@@ -606,13 +612,14 @@ fun TrackListScreen(
                     )
                 }
             }
+        if (onAlbum != null) item { ArtistAlbums(albumTracks, onAlbum) }
         item {
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    strings.format(R.string.tracks, sorted.size),
+                    strings.plural(R.plurals.tracks, sorted.size, sorted.size),
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -621,28 +628,34 @@ fun TrackListScreen(
                     IconButton({ menu = true }) {
                         Icon(Icons.AutoMirrored.Filled.Sort, strings[R.string.sort])
                     }
-                    DropdownMenu(menu, { menu = false }) {
-                        listOf(
-                                strings[R.string.list_order],
-                                strings[R.string.by_artist],
-                                strings[R.string.newest_first],
-                                strings[R.string.by_track_number],
-                                strings[R.string.by_duration],
-                                strings[R.string.most_played],
-                                strings[R.string.recently_played_first],
-                                strings[R.string.by_file_size],
-                                strings[R.string.by_title],
-                            )
-                            .forEachIndexed { i, label ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    onClick = {
+                    if (menu)
+                        ExpressiveActions(
+                            strings[R.string.sort],
+                            strings.label(name),
+                            { menu = false },
+                            listOf(
+                                    strings[R.string.list_order],
+                                    strings[R.string.by_artist],
+                                    strings[R.string.newest_first],
+                                    strings[R.string.by_track_number],
+                                    strings[R.string.by_duration],
+                                    strings[R.string.most_played],
+                                    strings[R.string.recently_played_first],
+                                    strings[R.string.by_file_size],
+                                    strings[R.string.by_title],
+                                )
+                                .mapIndexed { i, label ->
+                                    PlayerAction(
+                                        label,
+                                        "",
+                                        if (sort == i) Icons.Default.Check
+                                        else Icons.AutoMirrored.Filled.Sort,
+                                    ) {
                                         sort = i
                                         menu = false
-                                    },
-                                )
-                            }
-                    }
+                                    }
+                                },
+                        )
                 }
                 IconButton({ vm.play(sorted.random(), sorted, name, true, true) }) {
                     Icon(Icons.Default.Shuffle, strings[R.string.library_screens_shuffle])
@@ -650,6 +663,7 @@ fun TrackListScreen(
                 FilledTonalButton(
                     { vm.play(sorted.first(), sorted, name, true, false) },
                     contentPadding = PaddingValues(horizontal = 16.dp),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                 ) {
                     Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
                     Text(strings[R.string.library_screens_play])
@@ -677,6 +691,7 @@ fun SearchScreen(
     onCollection: (String, List<Track>) -> Unit,
     onAdd: (Track) -> Unit,
     onPlaylist: (Long) -> Unit,
+    onArtist: (String, List<Track>) -> Unit = onCollection,
 ) {
     val strings = rememberText()
     val mergeArtists = LocalLadSettings.current.mergeArtists
@@ -694,6 +709,26 @@ fun SearchScreen(
     val foundPlaylists =
         remember(query, playlists) {
             if (query.isBlank()) emptyList() else playlists.filter { it.name.contains(query, true) }
+        }
+    val foundArtists =
+        remember(query, tracks, mergeArtists) {
+            if (query.isBlank()) emptyList()
+            else
+                ArtistCredits(tracks.map { it.artist }, mergeArtists)
+                    .groups(tracks) { it.artist }
+                    .filter { it.name.contains(query, true) }
+                    .take(4)
+        }
+    val foundAlbums =
+        remember(query, found) {
+            if (query.isBlank()) emptyList()
+            else
+                found
+                    .groupBy { "${it.album} • ${it.artist}" }
+                    .filterKeys { it.contains(query, true) }
+                    .entries
+                    .take(4)
+                    .toList()
         }
     Column(Modifier.padding(horizontal = 16.dp)) {
         OutlinedTextField(
@@ -718,35 +753,27 @@ fun SearchScreen(
                     ListItem(
                         headlineContent = { Text(p.name) },
                         supportingContent = {
-                            Text(strings.format(R.string.playlist_tracks, p.tracks.size))
+                            Text(
+                                strings.plural(
+                                    R.plurals.playlist_tracks,
+                                    p.tracks.size,
+                                    p.tracks.size,
+                                )
+                            )
                         },
                         modifier = Modifier.clickable { onPlaylist(p.id) },
                     )
                 }
-                val artists =
-                    ArtistCredits(tracks.map { it.artist }, mergeArtists)
-                        .groups(tracks) { it.artist }
-                        .filter { it.name.contains(query, true) }
-                        .take(4)
-                items(artists, key = { "a${it.key}" }) { group ->
+                items(foundArtists, key = { "a${it.key}" }) { group ->
                     val a = group.name
                     ListItem(
                         headlineContent = { Text(a) },
                         supportingContent = { Text(strings[R.string.artist]) },
-                        leadingContent = { Icon(Icons.Default.Person, null) },
-                        modifier =
-                            Modifier.clickable {
-                                onCollection(a, group.items)
-                            },
+                        leadingContent = { ArtistPortrait(a, group.items, Modifier.size(48.dp)) },
+                        modifier = Modifier.clickable { onArtist(a, group.items) },
                     )
                 }
-                val albums =
-                    found
-                        .groupBy { "${it.album} • ${it.artist}" }
-                        .filterKeys { it.contains(query, true) }
-                        .entries
-                        .take(4)
-                items(albums, key = { "album${it.key}" }) { (a, list) ->
+                items(foundAlbums, key = { "album${it.key}" }) { (a, list) ->
                     ListItem(
                         headlineContent = { Text(a) },
                         supportingContent = { Text(strings[R.string.album]) },

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import android.content.Intent
@@ -37,8 +39,8 @@ fun FolderPicker(
                 val path =
                     if (uri.authority == "com.android.externalstorage.documents")
                         attempt {
-                            FolderRules.fromDocumentId(DocumentsContract.getTreeDocumentId(uri))
-                        }
+                                FolderRules.fromDocumentId(DocumentsContract.getTreeDocumentId(uri))
+                            }
                             .getOrNull()
                     else null
                 if (path == null) error = strings[R.string.choose_a_folder_on_your_phone]
@@ -66,7 +68,11 @@ fun FolderPicker(
                     if (allow) strings[R.string.choose_one_or_more_folders_an]
                     else strings[R.string.hide_music_from_these_folders_and]
                 )
-                FilledTonalButton({ picker.launch(null) }, Modifier.fillMaxWidth()) {
+                FilledTonalButton(
+                    { picker.launch(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
                     Text(strings[R.string.choose_in_file_picker])
                 }
                 error?.let {
@@ -76,7 +82,10 @@ fun FolderPicker(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                TextButton(onClick = { selected = emptySet() }) {
+                TextButton(
+                    onClick = { selected = emptySet() },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
                     Text(strings[R.string.clear_selection])
                 }
                 LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
@@ -110,6 +119,7 @@ fun FolderPicker(
                         }
                     },
                     enabled = custom.isNotBlank(),
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.add_path])
                 }
@@ -124,11 +134,19 @@ fun FolderPicker(
                             .sorted()
                             .joinToString("\n")
                     )
-                }
+                },
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.apply])
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(strings[R.string.cancel]) } },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
+                Text(strings[R.string.cancel])
+            }
+        },
     )
 }

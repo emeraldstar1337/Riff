@@ -1,10 +1,12 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package dev.lad.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -15,10 +17,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,6 +39,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+private data class LyricsTiming(val index: Int, val word: Int, val clock: PlaybackState)
 
 @Composable
 fun LyricsContent(
@@ -57,27 +61,49 @@ fun LyricsContent(
     var following by remember(track.id) { mutableStateOf(true) }
     val list = rememberLazyListState()
     val userDragging by list.interactionSource.collectIsDraggedAsState()
+    val appearanceRevision by vm.appearance.changes.collectAsStateWithLifecycle()
+    val offset = remember(track.id, appearanceRevision) { vm.appearance.lyricsOffset(track.id) }
+    var timingOpen by remember { mutableStateOf(false) }
+    var shareOpen by remember { mutableStateOf(false) }
     val lines = remember(record?.text) { LrcParser.parse(record?.text.orEmpty()) }
 
     val progress =
-        remember(lines, vm) {
+        remember(lines, vm, offset) {
             vm.playback.state
-                .map { clock ->
+                .map { rawClock ->
+                    val clock = rawClock.copy(positionMs = rawClock.positionMs + offset)
                     val index = LrcParser.current(lines, clock.positionMs)
                     val word =
                         lines.getOrNull(index)?.let { LrcParser.currentWord(it, clock.positionMs) }
                             ?: -1
-                    Triple(index, word, clock.positionMs)
+                    LyricsTiming(index, word, clock)
                 }
                 .distinctUntilChanged { previous, next ->
-                    previous.first == next.first && previous.second == next.second
+                    previous.index == next.index &&
+                        previous.word == next.word &&
+                        previous.clock.playing == next.clock.playing &&
+                        previous.clock.speed == next.clock.speed &&
+                        kotlin.math.abs(
+                            next.clock.positionMs -
+                                previous.clock.positionMs -
+                                ((next.clock.positionTimestampMs -
+                                        previous.clock.positionTimestampMs) *
+                                        if (previous.clock.playing) previous.clock.speed else 0f)
+                                    .toLong()
+                        ) < 250
                 }
         }
     val initial =
-        remember(lines) { Triple(LrcParser.current(lines, state.positionMs), -1, state.positionMs) }
+        remember(lines, offset) {
+            LyricsTiming(
+                LrcParser.current(lines, state.positionMs + offset),
+                -1,
+                state.copy(positionMs = state.positionMs + offset),
+            )
+        }
     val timing = if (visible) progress.collectAsStateWithLifecycle(initial).value else initial
-    val position = timing.third
-    val current = timing.first
+    val position = timing.clock.positionMs
+    val current = timing.index
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner, lines.isNotEmpty(), visible) {
         fun update() {
@@ -94,7 +120,7 @@ fun LyricsContent(
             vm.playback.lyricsVisible.value = false
         }
     }
-    DisposableEffect(lines, current, timing.second, visible) {
+    DisposableEffect(lines, current, timing.word, visible, offset) {
         val line = lines.getOrNull(current)
         val nextWord =
             line
@@ -104,7 +130,10 @@ fun LyricsContent(
                 ?.minOrNull()
         val nextLine = lines.getOrNull(current + 1)?.timeMs
         vm.playback.lyricsDeadline.value =
-            if (visible) minOf(nextWord ?: Long.MAX_VALUE, nextLine ?: Long.MAX_VALUE)
+            if (visible)
+                minOf(nextWord ?: Long.MAX_VALUE, nextLine ?: Long.MAX_VALUE).let {
+                    if (it == Long.MAX_VALUE) it else (it - offset).coerceAtLeast(0)
+                }
             else Long.MAX_VALUE
         onDispose { vm.playback.lyricsDeadline.value = Long.MAX_VALUE }
     }
@@ -134,10 +163,67 @@ fun LyricsContent(
 
             withFrameNanos {}
             val offset = -list.layoutInfo.viewportSize.height / 3
-            if (animations) list.animateScrollToItem(current, offset)
-            else list.scrollToItem(current, offset)
+            val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == current }
+            if (!animations) list.scrollToItem(current, offset)
+            else if (item != null)
+                list.animateScrollBy(
+                    (item.offset + offset).toFloat(),
+                    spring(dampingRatio = 1f, stiffness = 65f),
+                )
+            else list.animateScrollToItem(current, offset)
         }
     }
+    if (timingOpen)
+        AlertDialog(
+            onDismissRequest = { timingOpen = false },
+            title = { Text(strings[R.string.lyrics_timing]) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(strings[R.string.lyrics_timing_hint])
+                    Text(
+                        strings.format(R.string.offset_seconds, offset / 1000f),
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            { vm.appearance.setLyricsOffset(track.id, offset - 100) },
+                            modifier = Modifier.weight(1f),
+                            enabled = offset > -30000,
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                        ) {
+                            Text(strings[R.string.lyrics_later])
+                        }
+                        Button(
+                            { vm.appearance.setLyricsOffset(track.id, offset + 100) },
+                            modifier = Modifier.weight(1f),
+                            enabled = offset < 30000,
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                        ) {
+                            Text(strings[R.string.lyrics_earlier])
+                        }
+                    }
+                    TextButton(
+                        { vm.appearance.setLyricsOffset(track.id, 0) },
+                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    ) {
+                        Text(strings[R.string.reset])
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    { timingOpen = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.close])
+                }
+            },
+        )
+    if (shareOpen)
+        MusicSharePanel(track, vm, lines.getOrNull(current)?.text.orEmpty()) { shareOpen = false }
     val importer =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null)
@@ -177,7 +263,12 @@ fun LyricsContent(
                         else strings[R.string.follow_lyrics],
                     )
                 }
-            TextButton({ search = true }) { Text(strings[R.string.find]) }
+            TextButton(
+                { search = true },
+                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+            ) {
+                Text(strings[R.string.find])
+            }
             var menu by remember { mutableStateOf(false) }
             Box {
                 IconButton({ menu = true }) {
@@ -189,6 +280,22 @@ fun LyricsContent(
                         strings[R.string.synced_lines_and_your_own_files],
                         { menu = false },
                         listOf(
+                            PlayerAction(
+                                strings[R.string.lyrics_timing],
+                                strings[R.string.lyrics_timing_hint],
+                                Icons.Default.Sync,
+                            ) {
+                                menu = false
+                                timingOpen = true
+                            },
+                            PlayerAction(
+                                strings[R.string.share_card],
+                                strings[R.string.share_card_hint],
+                                Icons.Default.Share,
+                            ) {
+                                menu = false
+                                shareOpen = true
+                            },
                             PlayerAction(
                                 strings[R.string.import_lrc_txt],
                                 strings[R.string.choose_a_file],
@@ -226,8 +333,9 @@ fun LyricsContent(
             lines.isNotEmpty() ->
                 LazyColumn(
                     state = list,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentPadding = PaddingValues(top = 28.dp, bottom = 80.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f).lyricEdges(),
+                    contentPadding =
+                        PaddingValues(start = 12.dp, end = 12.dp, top = 56.dp, bottom = 260.dp),
                     verticalArrangement =
                         Arrangement.spacedBy(
                             ((LocalLadSettings.current.lyricsSpacing - 1f) * 48f).dp
@@ -241,10 +349,13 @@ fun LyricsContent(
                             index == current,
                             position,
                             {
-                                vm.playback.seek(line.timeMs)
+                                vm.playback.seek((line.timeMs - offset).coerceAtLeast(0))
                                 following = true
                             },
                             Modifier.testTag("lyric-line-$index"),
+                            clock = timing.clock.takeIf { visible },
+                            endTimeMs = lines.getOrNull(index + 1)?.timeMs,
+                            distance = if (current >= 0) kotlin.math.abs(index - current) else 0,
                         )
                     }
                 }
@@ -252,6 +363,7 @@ fun LyricsContent(
                 Column(
                     Modifier.fillMaxWidth()
                         .weight(1f)
+                        .lyricEdges()
                         .verticalScroll(rememberScrollState())
                         .padding(vertical = 20.dp)
                 ) {
@@ -262,7 +374,7 @@ fun LyricsContent(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        record!!.text,
+                        record?.text.orEmpty(),
                         Modifier.fillMaxWidth(),
                         style = lyricTextStyle(LocalLadSettings.current),
                         textAlign =
@@ -289,7 +401,10 @@ fun LyricsContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton({ search = true }) {
+                        TextButton(
+                            { search = true },
+                            shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                        ) {
                             Text(strings[R.string.find_another_version])
                         }
                     }
@@ -315,32 +430,44 @@ fun LyricsContent(
                 }
             },
             confirmButton = {
-                TextButton({
-                    scope.launch {
-                        try {
-                            vm.lyrics.save(track.id, draft, strings[R.string.manual])
-                            record = vm.lyrics.load(track)
-                            following = true
-                            editing = false
-                            error = null
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            saveError = e.message
+                TextButton(
+                    {
+                        scope.launch {
+                            try {
+                                vm.lyrics.save(track.id, draft, strings[R.string.manual])
+                                record = vm.lyrics.load(track)
+                                following = true
+                                editing = false
+                                error = null
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                saveError = e.message
+                            }
                         }
-                    }
-                }) {
+                    },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
                     Text(strings[R.string.save])
                 }
             },
-            dismissButton = { TextButton({ editing = false }) { Text(strings[R.string.cancel]) } },
+            dismissButton = {
+                TextButton(
+                    { editing = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.cancel])
+                }
+            },
         )
     }
     if (search) {
+        val searchScope = rememberCoroutineScope()
         var title by remember(track.id) { mutableStateOf(track.title) }
         var artist by remember(track.id) { mutableStateOf(track.artist) }
         var busy by remember { mutableStateOf(false) }
         var searchError by remember { mutableStateOf<String?>(null) }
+        var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
         suspend fun searchOnline() {
             busy = true
             searchError = null
@@ -357,7 +484,11 @@ fun LyricsContent(
                 busy = false
             }
         }
-        LaunchedEffect(Unit) { searchOnline() }
+        fun triggerSearch() {
+            searchJob?.cancel()
+            searchJob = searchScope.launch { searchOnline() }
+        }
+        LaunchedEffect(Unit) { triggerSearch() }
         AlertDialog(
             onDismissRequest = { search = false },
             title = { Text(strings[R.string.lyrics_panel_synced_lyrics]) },
@@ -383,8 +514,9 @@ fun LyricsContent(
                         singleLine = true,
                     )
                     FilledTonalButton(
-                        { scope.launch { searchOnline() } },
+                        { triggerSearch() },
                         enabled = !busy && title.isNotBlank(),
+                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                     ) {
                         if (busy)
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -398,7 +530,7 @@ fun LyricsContent(
                         )
                     }
                     candidates.forEach { candidate ->
-                        OutlinedCard(
+                        Card(
                             onClick = {
                                 scope.launch {
                                     try {
@@ -436,64 +568,16 @@ fun LyricsContent(
                     }
                 }
             },
-            confirmButton = { TextButton({ search = false }) { Text(strings[R.string.close]) } },
+            confirmButton = {
+                TextButton(
+                    { search = false },
+                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                ) {
+                    Text(strings[R.string.close])
+                }
+            },
         )
     }
-}
-
-@Composable
-internal fun LyricLineText(
-    line: dev.lad.domain.LyricLine,
-    active: Boolean,
-    positionMs: Long,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val animations = LocalLadSettings.current.animations
-    val appearance = LocalLadSettings.current
-    val timedWords = line.words.isNotEmpty()
-    val activeWord = if (active) LrcParser.currentWord(line, positionMs) else -1
-    val color by
-        animateColorAsState(
-            MaterialTheme.colorScheme.onSurface.copy(
-                alpha = if (active) 1f else appearance.lyricsDim.coerceAtMost(0.6f)
-            ),
-            tween(LadMotion.duration(LadMotion.standard, animations)),
-            label = "lyric highlight",
-        )
-    val primary = MaterialTheme.colorScheme.primary
-    val emphasis by
-        androidx.compose.animation.core.animateFloatAsState(
-            if (active) 1.03f else 1f,
-            androidx.compose.animation.core.tween(if (animations) 180 else 0),
-            label = "active lyric",
-        )
-    val text = buildAnnotatedString {
-        append(line.text.ifBlank { "♪" })
-        line.words.getOrNull(activeWord)?.let { word ->
-            addStyle(
-                SpanStyle(color = primary, fontWeight = FontWeight.Black),
-                word.start,
-                word.end,
-            )
-        }
-    }
-    Text(
-        text,
-        modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = emphasis
-                scaleY = emphasis
-            }
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        style = lyricTextStyle(appearance),
-        textAlign =
-            if (appearance.lyricsAlignment == "center") TextAlign.Center else TextAlign.Start,
-        fontWeight = if (active) FontWeight.Black else FontWeight.Medium,
-        color = color,
-    )
 }
 
 @Composable
@@ -505,3 +589,21 @@ internal fun lyricTextStyle(appearance: Settings) =
                     appearance.lyricsSpacing.coerceIn(1.1f, 1.7f))
                 .sp,
     )
+
+internal fun Modifier.lyricEdges(): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithCache {
+            val edge = minOf(40.dp.toPx(), size.height / 4f)
+            val fraction = if (size.height > 0) edge / size.height else 0f
+            val mask =
+                Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    fraction to Color.Black,
+                    (1f - fraction) to Color.Black,
+                    1f to Color.Transparent,
+                )
+            onDrawWithContent {
+                drawContent()
+                drawRect(mask, blendMode = BlendMode.DstIn)
+            }
+        }
