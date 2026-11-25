@@ -151,12 +151,7 @@ internal suspend fun renderMusicCard(
         canvas.drawPath(shape(1040f, height * .50f, 270f, 3), paint)
         canvas.drawPath(shape(100f, height * .85f, 190f, 4), paint)
         val rect = RectF((1080f - artSize) / 2, top, (1080f + artSize) / 2, top + artSize)
-        val artPath =
-            when (coverShape) {
-                "flower" -> shape(rect.centerX(), rect.centerY(), artSize / 2, 10, .09f)
-                "circle" -> Path().apply { addOval(rect, Path.Direction.CW) }
-                else -> Path().apply { addRoundRect(rect, 64f, 64f, Path.Direction.CW) }
-            }
+        val artPath = buildCoverAndroidPath(rect, coverShape, 64f)
         paint.alpha = 255
         canvas.save()
         canvas.clipPath(artPath)

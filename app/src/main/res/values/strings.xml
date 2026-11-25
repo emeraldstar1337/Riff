@@ -382,7 +382,7 @@
   <string name="vinyl_artwork">"Vinyl artwork"</string>
   <string name="rotates_during_playback">"Rotates during playback"</string>
   <string name="visualizer">"Visualizer"</string>
-  <string name="the_wave_responds_to_the_audio">"The wave responds to the audio"</string>
+  <string name="the_wave_responds_to_the_audio">"Compact live audio wave in the top player bar"</string>
   <string name="track_transitions">"Track transitions"</string>
   <string name="extra_mixing_is_off_by_default">"Extra mixing is off by default"</string>
   <string name="crossfade">"Crossfade"</string>
@@ -567,4 +567,23 @@
     <string name="settings_lyrics_detail">Size, spacing, alignment and brightness</string>
     <string name="settings_player_detail">Layout, seek bar, mini player and widgets</string>
     <string name="settings_audio_detail">Bit-perfect, equalizer, crossfade and devices</string>
+    <string name="clover_shape">Clover</string>
+    <string name="cookie_shape">Cookie</string>
+    <string name="sunny_shape">Sunny</string>
+    <string name="cover_morph_title">Morph shape on play</string>
+    <string name="cover_morph_description">Rests softly when paused and morphs into your chosen shape during playback</string>
+    <string name="season_recaps_title">Season recaps</string>
+    <string name="season_recaps_subtitle">Browse winter, spring, summer and autumn stories</string>
+    <string name="demo_recaps_title">Demo preview</string>
+    <string name="season_recap_ready_eyebrow">SEASON COMPLETE</string>
+    <string name="season_recap_ready_title">%1$s %2$d recap is ready</string>
+    <string name="season_recap_ready_subtitle">Tap to watch your musical stories for the past season</string>
+    <string name="recap_teaser_minutes">Music followed you everywhere… How many minutes did it add up to?</string>
+    <string name="recap_teaser_track">Dozens of songs played, yet one kept pulling you back…</string>
+    <string name="recap_teaser_artist">Out of every voice you heard, one defined your sound…</string>
+    <string name="recap_teaser_album">More than single tracks — one album held your attention from start to finish…</string>
+    <string name="recap_teaser_time">Your music had a favourite hour of the day…</string>
+    <string name="pause_cover_shape_title">Shape when paused</string>
+    <string name="pause_cover_shape_subtitle">The artwork smoothly morphs between pause and playback shapes</string>
+    <string name="morph_preview_tap_hint">Tap to test play / pause morph</string>
 </resources>

@@ -14,6 +14,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
@@ -24,21 +25,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.lad.BuildConfig
 import dev.lad.R
 import dev.lad.data.AppearancePresets
+import dev.lad.data.Listen
 import dev.lad.data.Settings
 import dev.lad.domain.BitPerfectState
 import dev.lad.domain.FolderRules
 import dev.lad.i18n.AppLanguage
 import dev.lad.i18n.TextResources
 import dev.lad.i18n.rememberText
+import dev.lad.statistics.MusicStats
+import dev.lad.statistics.RecapGenerator
+import dev.lad.statistics.Season
 import java.time.LocalDate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class SettingsGroup(val title: Int) {
     APPEARANCE(R.string.settings_group_appearance),
@@ -150,15 +159,19 @@ fun SettingsScreen(
     vm: LadViewModel,
     onDemo: (Boolean) -> Unit,
     onDuplicates: () -> Unit = {},
+    onSeasonRecap: (MusicStats, String) -> Unit = { _, _ -> },
 ) {
     val strings = rememberText()
+    val scope = rememberCoroutineScope()
     val animations = LocalLadSettings.current.animations
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var included by remember { mutableStateOf(false) }
     var excluded by remember { mutableStateOf(false) }
     var clear by remember { mutableStateOf(false) }
+    var seasonYear by rememberSaveable { mutableIntStateOf(LocalDate.now().year) }
     val folders by vm.folders.collectAsStateWithLifecycle()
+    val history by vm.statisticsState.history.collectAsStateWithLifecycle()
     val bitPerfectFlow =
         remember(vm) { vm.playback.state.map { it.bitPerfect }.distinctUntilChanged() }
     val bitPerfect by bitPerfectFlow.collectAsStateWithLifecycle(initialValue = BitPerfectState())
@@ -292,6 +305,25 @@ fun SettingsScreen(
                         historySettingsSection(
                             settings = settings,
                             strings = strings,
+                            seasonYear = seasonYear,
+                            onSeasonYearChange = { seasonYear = it },
+                            onOpenSeason = { season ->
+                                val chosenYear = seasonYear
+                                scope.launch {
+                                    val aggregated =
+                                        withContext(Dispatchers.Default) {
+                                            RecapGenerator.aggregate(
+                                                history,
+                                                RecapGenerator.season(season, chosenYear),
+                                                mergeArtists = settings.mergeArtists,
+                                            )
+                                        }
+                                    onSeasonRecap(
+                                        aggregated,
+                                        "${strings.label(season.label)} $chosenYear",
+                                    )
+                                }
+                            },
                             onUpdate = vm::updateSettings,
                             onDemo = onDemo,
                             onClear = { clear = true },
@@ -425,16 +457,49 @@ private fun LazyListScope.shapesSettingsSection(
             strings[R.string.image_shapes_in_the_library_and],
         )
     }
+    val shapeOptions =
+        listOf(
+            "rounded" to strings[R.string.rounded],
+            "circle" to strings[R.string.circle],
+            "flower" to strings[R.string.flower],
+            "clover" to strings[R.string.clover_shape],
+            "cookie" to strings[R.string.cookie_shape],
+            "sunny" to strings[R.string.sunny_shape],
+        )
     item {
-        ChoiceChips(
-            settings.coverShape,
-            listOf(
-                "rounded" to strings[R.string.rounded],
-                "circle" to strings[R.string.circle],
-                "flower" to strings[R.string.flower],
-            ),
-        ) {
+        CoverShapeChoices(settings.coverShape, shapeOptions) {
             onUpdate { current -> current.copy(coverShape = it) }
+        }
+    }
+    item {
+        SettingSwitch(
+            strings[R.string.cover_morph_title],
+            strings[R.string.cover_morph_description],
+            settings.coverMorph,
+        ) {
+            onUpdate { current -> current.copy(coverMorph = it) }
+        }
+    }
+    item {
+        AnimatedVisibility(
+            visible = settings.coverMorph,
+            enter = fadeIn(LadMotion.defaultEffects(settings.animations)) + expandVertically(),
+            exit = fadeOut(LadMotion.fastEffects(settings.animations)) + shrinkVertically(),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionTitle(
+                    strings[R.string.pause_cover_shape_title],
+                    strings[R.string.pause_cover_shape_subtitle],
+                )
+                CoverShapeChoices(settings.pauseCoverShape, shapeOptions) {
+                    onUpdate { current -> current.copy(pauseCoverShape = it) }
+                }
+                PlayPauseMorphPreview(
+                    pauseShape = settings.pauseCoverShape,
+                    playShape = settings.coverShape,
+                    animations = settings.animations,
+                )
+            }
         }
     }
     item { SectionTitle(strings[R.string.transitions], strings[R.string.interface_motion]) }
@@ -949,6 +1014,9 @@ private fun LazyListScope.librarySettingsSection(
 private fun LazyListScope.historySettingsSection(
     settings: Settings,
     strings: TextResources,
+    seasonYear: Int,
+    onSeasonYearChange: (Int) -> Unit,
+    onOpenSeason: (Season) -> Unit,
     onUpdate: ((Settings) -> Settings) -> Unit,
     onDemo: (Boolean) -> Unit,
     onClear: () -> Unit,
@@ -973,6 +1041,96 @@ private fun LazyListScope.historySettingsSection(
             onUpdate { current -> current.copy(recapArtwork = it) }
         }
     }
+    item {
+        SectionTitle(
+            strings[R.string.season_recaps_title],
+            strings[R.string.season_recaps_subtitle],
+        )
+    }
+    item {
+        Surface(
+            shape = LadShapes.card,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    IconButton(
+                        onClick = { if (seasonYear > 1970) onSeasonYearChange(seasonYear - 1) },
+                        enabled = seasonYear > 1970,
+                    ) {
+                        Icon(Icons.Default.ChevronLeft, strings[R.string.previous_year])
+                    }
+                    Text(
+                        seasonYear.toString(),
+                        style =
+                            MaterialTheme.typography.titleLarge.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
+                    )
+                    IconButton(
+                        onClick = {
+                            if (seasonYear < LocalDate.now().year) onSeasonYearChange(seasonYear + 1)
+                        },
+                        enabled = seasonYear < LocalDate.now().year,
+                    ) {
+                        Icon(Icons.Default.ChevronRight, strings[R.string.next_year])
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Season.entries.forEachIndexed { idx, s ->
+                        val itemShape =
+                            when (idx) {
+                                0 ->
+                                    RoundedCornerShape(
+                                        topStart = 24.dp,
+                                        bottomStart = 24.dp,
+                                        topEnd = 8.dp,
+                                        bottomEnd = 8.dp,
+                                    )
+                                Season.entries.lastIndex ->
+                                    RoundedCornerShape(
+                                        topStart = 8.dp,
+                                        bottomStart = 8.dp,
+                                        topEnd = 24.dp,
+                                        bottomEnd = 24.dp,
+                                    )
+                                else -> RoundedCornerShape(8.dp)
+                            }
+                        FilledTonalButton(
+                            onClick = { onOpenSeason(s) },
+                            modifier =
+                                Modifier.weight(1f).defaultMinSize(minWidth = 1.dp, minHeight = 48.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 12.dp),
+                            shapes =
+                                ButtonDefaults.shapes(
+                                    shape = itemShape,
+                                    pressedShape = RoundedCornerShape(16.dp),
+                                ),
+                        ) {
+                            Text(
+                                strings.label(s.label),
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    item { SectionTitle(strings[R.string.demo_recaps_title]) }
     item {
         SettingsAction(
             strings[R.string.season_demo],

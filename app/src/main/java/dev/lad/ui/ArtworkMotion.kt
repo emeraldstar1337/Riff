@@ -79,7 +79,8 @@ internal fun ArtworkMotion(
                 if (animated) tween<Float>(300, easing = FastOutSlowInEasing) else snap()
             val sign = if (direction < 0) -1 else 1
             when (settings.coverTransition) {
-                    "cards" ->
+                    "cards",
+                    "slide" ->
                         (slideInHorizontally(slideSpec) { it * sign } +
                                 scaleIn(scaleSpec, initialScale = .90f))
                             .togetherWith(
@@ -100,6 +101,7 @@ internal fun ArtworkMotion(
                                     scaleOut(scaleSpec, targetScale = .84f) +
                                     slideOutHorizontally(slideSpec) { -it * sign / 5 }
                             )
+                    "none" -> EnterTransition.None.togetherWith(ExitTransition.None)
                     else ->
                         (fadeIn(fadeSpec) + slideInHorizontally(slideSpec) { it * sign / 12 })
                             .togetherWith(ExitTransition.None)

@@ -382,7 +382,7 @@
   <string name="vinyl_artwork">"Обложка-пластинка"</string>
   <string name="rotates_during_playback">"Вращается во время воспроизведения"</string>
   <string name="visualizer">"Визуализатор"</string>
-  <string name="the_wave_responds_to_the_audio">"Волна реагирует на настоящий звук"</string>
+  <string name="the_wave_responds_to_the_audio">"Аккуратный живой индикатор волны в верхней панели плеера"</string>
   <string name="track_transitions">"Переход между песнями"</string>
   <string name="extra_mixing_is_off_by_default">"По умолчанию музыка звучит без дополнительного смешивания"</string>
   <string name="crossfade">"Кроссфейд"</string>
@@ -567,4 +567,23 @@
     <string name="settings_lyrics_detail">Размер, интервал, выравнивание и яркость</string>
     <string name="settings_player_detail">Вид экрана, ползунок, мини-плеер и виджеты</string>
     <string name="settings_audio_detail">Bit-perfect, эквалайзер, кроссфейд и устройства</string>
+    <string name="clover_shape">Клевер</string>
+    <string name="cookie_shape">Печенье</string>
+    <string name="sunny_shape">Солнце</string>
+    <string name="cover_morph_title">Живая форма при игре</string>
+    <string name="cover_morph_description">На паузе обложка спокойная, а при воспроизведении плавно принимает выбранную фигуру</string>
+    <string name="season_recaps_title">Итоги по сезонам</string>
+    <string name="season_recaps_subtitle">Истории за зиму, весну, лето и осень</string>
+    <string name="demo_recaps_title">Демоверсия итогов</string>
+    <string name="season_recap_ready_eyebrow">СЕЗОН ЗАВЕРШЁН</string>
+    <string name="season_recap_ready_title">Итоги сезона: %1$s %2$d</string>
+    <string name="season_recap_ready_subtitle">Открой историю треков и артистов ушедшего сезона</string>
+    <string name="recap_teaser_minutes">Музыка сопровождала тебя повсюду… Сколько минут набежало?</string>
+    <string name="recap_teaser_track">Десятки песен звучали в наушниках, но одна возвращалась снова и снова…</string>
+    <string name="recap_teaser_artist">Среди всех голосов один стал твоим главным саундтреком…</string>
+    <string name="recap_teaser_album">Не просто отдельные треки — один альбом ты слушал на одном дыхании…</string>
+    <string name="recap_teaser_time">У твоей музыки было любимое время суток…</string>
+    <string name="pause_cover_shape_title">Форма на паузе</string>
+    <string name="pause_cover_shape_subtitle">Обложка плавно перетекает между формой паузы и формой воспроизведения</string>
+    <string name="morph_preview_tap_hint">Нажми, чтобы проверить переход Play / Pause</string>
 </resources>

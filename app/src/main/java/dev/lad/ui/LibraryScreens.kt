@@ -39,7 +39,7 @@ fun HomeScreen(
     onCollection: (String, List<Track>) -> Unit,
     onAdd: (Track) -> Unit,
     onPlaylist: (Long) -> Unit,
-    onDemo: () -> Unit,
+    onSeasonRecap: (dev.lad.statistics.MusicStats, String) -> Unit = { _, _ -> },
 ) {
     val strings = rememberText()
     if (!permitted) {
@@ -101,6 +101,19 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+        item("season-recap-prompt") {
+            SeasonRecapPromptCard(
+                history = history,
+                settings = LocalLadSettings.current,
+                onOpen = { stats, label, key ->
+                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                    onSeasonRecap(stats, label)
+                },
+                onDismiss = { key ->
+                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                },
+            )
         }
         item {
             BitsReveal(key = featured.albumKey()) {
@@ -258,41 +271,6 @@ fun HomeScreen(
                             )
                         }
                     }
-                }
-            }
-        }
-        item {
-            Card(
-                onClick = onDemo,
-                shape = LadShapes.card,
-                colors =
-                    CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                    ),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Icon(
-                        Icons.Default.AutoAwesome,
-                        null,
-                        Modifier.size(30.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            strings[R.string.your_year_in_music],
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        Text(
-                            strings[R.string.demo_recap_10_stories],
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(Icons.Default.ChevronRight, null)
                 }
             }
         }

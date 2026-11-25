@@ -7,9 +7,11 @@ package dev.lad.ui
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
@@ -26,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -34,6 +37,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.lad.R
 import dev.lad.data.Settings
 import dev.lad.domain.LyricLine
@@ -92,67 +96,227 @@ fun ChoiceChips(
     swatches: Map<String, Color> = emptyMap(),
     onSelect: (String) -> Unit,
 ) {
-    // M3 Expressive: connected button groups stay in a single horizontal row (never wrap to 2 rows)
-    val fillWidth =
-        values.size in 2..3 &&
-            swatches.isEmpty() &&
-            values.sumOf { it.second.length } <= 28
-    @Composable
-    fun Choice(index: Int, modifier: Modifier = Modifier) {
-        val (value, name) = values[index]
-        val checked = current == value
-        val swatch = swatches[value]
-        ToggleButton(
-            checked = checked,
-            contentPadding =
-                if (fillWidth) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
-                else PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-            onCheckedChange = { onSelect(value) },
-            modifier =
-                modifier.heightIn(min = 48.dp).semantics {
-                    role = Role.RadioButton
-                    selected = checked
-                },
-            shapes =
-                when {
-                    values.size == 1 -> ToggleButtonDefaults.shapes()
-                    index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                    index == values.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                },
-        ) {
-            if (swatch != null) {
-                Box(
-                    Modifier.size(12.dp)
-                        .clip(CircleShape)
-                        .background(swatch)
-                )
-                Spacer(Modifier.width(8.dp))
+    if (values.isEmpty()) return
+    // M3 Expressive connected button group: always fits evenly in a single non-scrolling row
+    BoxWithConstraints(Modifier.fillMaxWidth().selectableGroup()) {
+        val count = values.size
+        val totalChars = values.sumOf { it.second.length } + swatches.size * 2
+        val compact = count >= 4 || maxWidth < 330.dp || totalChars > 26
+        val dense = count >= 5 || totalChars > 35 || maxWidth < 300.dp
+        val horizontalPad =
+            when {
+                dense -> 4.dp
+                compact -> 6.dp
+                else -> 12.dp
             }
-            Text(
-                name,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
+        val textSize =
+            when {
+                dense && totalChars > 38 -> 10.5.sp
+                dense -> 11.sp
+                compact -> 12.sp
+                else -> 13.5.sp
+            }
+        val swatchSize = if (dense) 8.dp else 10.dp
+        val swatchGap = if (dense) 4.dp else 6.dp
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            values.forEachIndexed { index, (value, name) ->
+                val checked = current == value
+                val swatch = swatches[value]
+                val itemWeight =
+                    if (count <= 3 && totalChars <= 26 && swatches.isEmpty()) 1f
+                    else
+                        4.5f +
+                            name.length.coerceIn(3, 14) * 0.55f +
+                            (if (swatch != null) 1.2f else 0f)
+                ToggleButton(
+                    checked = checked,
+                    contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 10.dp),
+                    onCheckedChange = { onSelect(value) },
+                    modifier =
+                        Modifier.weight(itemWeight)
+                            .defaultMinSize(minWidth = 1.dp, minHeight = 48.dp)
+                            .heightIn(min = 48.dp)
+                            .semantics {
+                                role = Role.RadioButton
+                                selected = checked
+                            },
+                    shapes =
+                        when {
+                            values.size == 1 -> ToggleButtonDefaults.shapes()
+                            index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            index == values.lastIndex ->
+                                ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                ) {
+                    if (swatch != null) {
+                        Box(Modifier.size(swatchSize).clip(CircleShape).background(swatch))
+                        Spacer(Modifier.width(swatchGap))
+                    }
+                    Text(
+                        name,
+                        fontSize = textSize,
+                        lineHeight = (textSize.value + 3f).sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
-    if (fillWidth) {
-        Row(
-            Modifier.fillMaxWidth().selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            values.indices.forEach { Choice(it, Modifier.weight(1f)) }
+}
+
+@Composable
+internal fun CoverShapeChoices(
+    current: String,
+    values: List<Pair<String, String>>,
+    onSelect: (String) -> Unit,
+) {
+    if (values.isEmpty()) return
+    Row(
+        Modifier.fillMaxWidth().selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        values.forEachIndexed { index, (value, name) ->
+            val checked = current == value
+            ToggleButton(
+                checked = checked,
+                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 10.dp),
+                onCheckedChange = { onSelect(value) },
+                modifier =
+                    Modifier.weight(1f)
+                        .defaultMinSize(minWidth = 1.dp, minHeight = 68.dp)
+                        .semantics {
+                            role = Role.RadioButton
+                            selected = checked
+                        },
+                shapes =
+                    when {
+                        values.size == 1 -> ToggleButtonDefaults.shapes()
+                        index == 0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                        index == values.lastIndex ->
+                            ButtonGroupDefaults.connectedTrailingButtonShapes()
+                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                    },
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier.size(24.dp)
+                            .clip(coverClipShape(value, 6))
+                            .background(
+                                LocalContentColor.current.copy(
+                                    alpha = if (checked) 0.94f else 0.62f
+                                )
+                            )
+                    )
+                    Text(
+                        name,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
-    } else {
-        val scrollState = rememberScrollState()
+    }
+}
+
+@Composable
+internal fun PlayPauseMorphPreview(
+    pauseShape: String,
+    playShape: String,
+    animations: Boolean,
+) {
+    val strings = rememberText()
+    var previewPlaying by remember { mutableStateOf(true) }
+    val morphFraction by
+        animateFloatAsState(
+            if (previewPlaying) 1f else 0f,
+            if (animations) spring(dampingRatio = 0.74f, stiffness = 260f) else snap(),
+            label = "preview morph",
+        )
+    val previewScale by
+        animateFloatAsState(
+            if (previewPlaying) 1f else 0.90f,
+            if (animations) spring(dampingRatio = 0.60f, stiffness = 280f) else snap(),
+            label = "preview scale",
+        )
+    val previewTwist by
+        animateFloatAsState(
+            if (!previewPlaying && pauseShape != playShape) -6f else 0f,
+            if (animations) spring(dampingRatio = 0.64f, stiffness = 240f) else snap(),
+            label = "preview twist",
+        )
+    val buttonCorner by
+        animateDpAsState(
+            if (previewPlaying) 16.dp else 28.dp,
+            LadMotion.fastSpatial(animations),
+            label = "preview btn corner",
+        )
+    Surface(
+        onClick = { previewPlaying = !previewPlaying },
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
         Row(
-            Modifier.fillMaxWidth()
-                .horizontalScroll(scrollState)
-                .selectableGroup(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            Modifier.fillMaxWidth().padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            values.indices.forEach { Choice(it) }
+            Box(
+                Modifier.size(72.dp)
+                    .graphicsLayer {
+                        scaleX = previewScale
+                        scaleY = previewScale
+                        rotationZ = previewTwist
+                    }
+                    .clip(MorphedCoverShape(pauseShape, playShape, morphFraction))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Album,
+                    null,
+                    Modifier.size(30.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (previewPlaying) strings[R.string.now_playing] else strings[R.string.paused],
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    strings[R.string.morph_preview_tap_hint],
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(buttonCorner),
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (previewPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        null,
+                    )
+                }
+            }
         }
     }
 }

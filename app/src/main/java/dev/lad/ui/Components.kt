@@ -42,6 +42,10 @@ fun duration(ms: Long): String {
 internal fun coverClipShape(coverShape: String, round: Int = 20): Shape =
     when (coverShape) {
         "flower" -> FlowerShape
+        "clover" -> CloverShape
+        "cookie" -> CookieShape
+        "sunny" -> SunnyShape
+        "squircle" -> SquircleShape
         "circle" -> CircleShape
         else -> RoundedCornerShape(round.dp)
     }
@@ -53,9 +57,10 @@ fun Artwork(uri: String?, title: String, modifier: Modifier = Modifier, round: I
     val ready = LocalReadyArtwork.current?.takeIf { it.uri == uri }
     val readyBitmap = ready?.bitmap
     val style = LocalLadSettings.current
+    val morphedShape = LocalCoverMorphShape.current
     val clipShape =
         if (LocalReadyArtwork.current != null && style.vinyl) CircleShape
-        else coverClipShape(style.coverShape, round)
+        else morphedShape ?: coverClipShape(style.coverShape, round)
     Box(
         modifier.clip(clipShape),
         contentAlignment = Alignment.Center,

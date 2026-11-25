@@ -59,4 +59,33 @@ class RecapGeneratorTest {
         val w = RecapGenerator.period(Period.MONTH, now)
         assertEquals(Instant.parse("2026-09-30T21:00:00Z").toEpochMilli(), w.start)
     }
+
+    @Test
+    fun completedSeasonDetectsEndOfEverySeasonAndYearBoundary() {
+        val endOfSummer = RecapGenerator.completedSeason(LocalDate.of(2026, 9, 1), ZoneOffset.UTC)
+        assertEquals(Season.SUMMER, endOfSummer.season)
+        assertEquals(2026, endOfSummer.year)
+        assertEquals("SUMMER:2026", endOfSummer.key)
+
+        val endOfAutumn = RecapGenerator.completedSeason(LocalDate.of(2026, 12, 5), ZoneOffset.UTC)
+        assertEquals(Season.AUTUMN, endOfAutumn.season)
+        assertEquals(2026, endOfAutumn.year)
+        assertEquals("AUTUMN:2026", endOfAutumn.key)
+
+        val januaryStillReferencesCompletedAutumn =
+            RecapGenerator.completedSeason(LocalDate.of(2027, 1, 15), ZoneOffset.UTC)
+        assertEquals(Season.AUTUMN, januaryStillReferencesCompletedAutumn.season)
+        assertEquals(2026, januaryStillReferencesCompletedAutumn.year)
+        assertEquals("AUTUMN:2026", januaryStillReferencesCompletedAutumn.key)
+
+        val endOfWinter = RecapGenerator.completedSeason(LocalDate.of(2027, 3, 1), ZoneOffset.UTC)
+        assertEquals(Season.WINTER, endOfWinter.season)
+        assertEquals(2027, endOfWinter.year)
+        assertEquals("WINTER:2027", endOfWinter.key)
+
+        val endOfSpring = RecapGenerator.completedSeason(LocalDate.of(2027, 6, 2), ZoneOffset.UTC)
+        assertEquals(Season.SPRING, endOfSpring.season)
+        assertEquals(2027, endOfSpring.year)
+        assertEquals("SPRING:2027", endOfSpring.key)
+    }
 }

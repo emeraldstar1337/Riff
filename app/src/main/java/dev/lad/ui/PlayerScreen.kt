@@ -143,12 +143,12 @@ fun MiniPlayer(
 }
 
 @Composable
-private fun LiveMeter(vm: LadViewModel) {
+private fun LiveMeter(vm: LadViewModel, playing: Boolean) {
     val owner = LocalLifecycleOwner.current
-    DisposableEffect(owner) {
+    DisposableEffect(owner, playing) {
         fun update() {
             vm.playback.meterVisible.value =
-                owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                playing && owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         }
         val observer = LifecycleEventObserver { _, _ -> update() }
         owner.lifecycle.addObserver(observer)
@@ -159,34 +159,76 @@ private fun LiveMeter(vm: LadViewModel) {
         }
     }
     val levels by vm.playback.levels.collectAsStateWithLifecycle()
-    SoundWave(levels, true, Modifier.size(24.dp, 14.dp))
+    SoundWave(levels, playing, Modifier.size(30.dp, 14.dp))
 }
 
 @Composable
 fun SoundWave(levels: List<Float>, playing: Boolean, modifier: Modifier = Modifier) {
     val color = MaterialTheme.colorScheme.primary
     val enabled = LocalLadSettings.current.animations
-    val bars =
-        (0 until 7).map { i ->
-            val target = if (playing) levels.drop(i * 3).take(3).maxOrNull() ?: 0f else 0f
-            val value by
-                animateFloatAsState(
-                    target,
-                    LadMotion.fastSpatial(enabled),
-                    label = "PCM envelope",
-                )
-            value
+    val owner = LocalLifecycleOwner.current
+    // 9 symmetrical center-weighted bars smoothed at native VSync (60/90/120Hz) with zero recomposition
+    val smoothed = remember { FloatArray(9) { 0.14f } }
+    val frameTick = remember { mutableIntStateOf(0) }
+    val latestLevels by rememberUpdatedState(levels)
+    val latestPlaying by rememberUpdatedState(playing)
+    val latestEnabled by rememberUpdatedState(enabled)
+
+    LaunchedEffect(owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            var prevNanos = 0L
+            // Center-symmetric band mapping: edges = highs/mids, center = warm bass/low-mids
+            val bandIndices = intArrayOf(16, 11, 7, 3, 1, 4, 8, 12, 17)
+            val weights = floatArrayOf(0.52f, 0.68f, 0.84f, 0.96f, 1.0f, 0.96f, 0.84f, 0.68f, 0.52f)
+            while (
+                kotlinx.coroutines.currentCoroutineContext()[
+                        androidx.compose.ui.MotionDurationScale]
+                    ?.scaleFactor ?: 1f > 0f
+            ) {
+                withFrameNanos { now ->
+                    val dt =
+                        if (prevNanos == 0L) 0.016f
+                        else ((now - prevNanos) / 1_000_000_000f).coerceIn(0.001f, 0.08f)
+                    prevNanos = now
+                    val raw = latestLevels
+                    val active = latestPlaying && raw.isNotEmpty()
+                    val attack = if (latestEnabled) (dt * 18f).coerceIn(0.08f, 0.48f) else 1f
+                    val release = if (latestEnabled) (dt * 7.5f).coerceIn(0.04f, 0.24f) else 1f
+                    for (i in 0 until 9) {
+                        val b = bandIndices[i]
+                        val sample =
+                            if (active) {
+                                val a = raw.getOrNull(b) ?: 0f
+                                val c = raw.getOrNull((b + 1).coerceAtMost(raw.lastIndex)) ?: a
+                                ((a + c) * 0.5f * weights[i]).coerceIn(0.14f, 1f)
+                            } else 0.14f
+                        val k = if (sample > smoothed[i]) attack else release
+                        smoothed[i] += (sample - smoothed[i]) * k
+                    }
+                    frameTick.intValue++
+                }
+            }
         }
+    }
+
     Canvas(modifier) {
-        if ((bars.maxOrNull() ?: 0f) <= 0.001f) return@Canvas
-        val gap = size.width / bars.size
-        bars.forEachIndexed { i, value ->
-            val h = size.height * value.coerceIn(0.12f, 1f)
-            drawRoundRect(
-                color,
-                Offset(i * gap, (size.height - h) / 2),
-                androidx.compose.ui.geometry.Size(gap * 0.55f, h),
-                androidx.compose.ui.geometry.CornerRadius(gap / 2),
+        frameTick.intValue // subscribe draw scope only
+        val count = 9
+        val barWidth = (size.width / (count * 1.85f)).coerceAtLeast(1.5.dp.toPx())
+        val totalBarsWidth = barWidth * count
+        val gap = ((size.width - totalBarsWidth) / (count - 1)).coerceAtLeast(1.dp.toPx())
+        val startX = (size.width - (totalBarsWidth + gap * (count - 1))) / 2f
+        for (i in 0 until count) {
+            val v = smoothed[i].coerceIn(0.14f, 1f)
+            val h = (size.height * v).coerceAtLeast(barWidth)
+            val x = startX + i * (barWidth + gap) + barWidth / 2f
+            val topY = (size.height - h) / 2f
+            drawLine(
+                color = color.copy(alpha = (0.45f + v * 0.55f).coerceIn(0.45f, 1f)),
+                start = Offset(x, topY + barWidth / 2f),
+                end = Offset(x, topY + h - barWidth / 2f),
+                strokeWidth = barWidth,
+                cap = StrokeCap.Round,
             )
         }
     }
@@ -383,12 +425,32 @@ fun FullPlayer(
     LaunchedEffect(Unit) {
         reveal.animateTo(1f, LadMotion.defaultSpatial(settings.animations))
     }
-    // M3 Expressive spatial spring shape morph for primary play/pause button
+    // M3 Expressive spatial spring shape morph for primary play/pause button and cover silhouette
     val playCorner by
         animateDpAsState(
             if (state.playing) 20.dp else 38.dp,
             LadMotion.fastSpatial(settings.animations),
             label = "play shape",
+        )
+    val coverMorphFraction by
+        animateFloatAsState(
+            if (state.playing) 1f else 0f,
+            if (settings.animations) spring(dampingRatio = 0.74f, stiffness = 260f) else snap(),
+            label = "cover morph",
+        )
+    val coverPlayScale by
+        animateFloatAsState(
+            if (!settings.coverMorph || settings.vinyl || state.playing) 1f else 0.92f,
+            if (settings.animations) spring(dampingRatio = 0.62f, stiffness = 280f) else snap(),
+            label = "cover play scale",
+        )
+    val shapesDiffer = settings.pauseCoverShape != settings.coverShape
+    val coverMorphTwist by
+        animateFloatAsState(
+            if (settings.coverMorph && !settings.vinyl && shapesDiffer && !state.playing) -6f
+            else 0f,
+            if (settings.animations) spring(dampingRatio = 0.64f, stiffness = 240f) else snap(),
+            label = "cover morph twist",
         )
     val playInteraction = remember { MutableInteractionSource() }
     val favScale = remember { Animatable(1f) }
@@ -475,22 +537,55 @@ fun FullPlayer(
                                         Modifier.weight(1f),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        Surface(
+                                            shape = CircleShape,
+                                            color =
+                                                if (
+                                                    settings.visualizer &&
+                                                        !settings.bitPerfect &&
+                                                        mediaVisible
+                                                )
+                                                    scheme.surfaceContainerHigh.copy(alpha = 0.72f)
+                                                else Color.Transparent,
                                         ) {
-                                            if (
-                                                settings.visualizer && state.playing && mediaVisible
-                                            )
-                                                LiveMeter(vm)
-                                            Text(
-                                                if (state.loading) strings[R.string.loading_track]
-                                                else if (state.playing)
-                                                    strings[R.string.now_playing]
-                                                else strings[R.string.paused],
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = accent,
-                                            )
+                                            Row(
+                                                Modifier.padding(
+                                                    horizontal =
+                                                        if (
+                                                            settings.visualizer &&
+                                                                !settings.bitPerfect &&
+                                                                mediaVisible
+                                                        )
+                                                            12.dp
+                                                        else 0.dp,
+                                                    vertical =
+                                                        if (
+                                                            settings.visualizer &&
+                                                                !settings.bitPerfect &&
+                                                                mediaVisible
+                                                        )
+                                                            4.dp
+                                                        else 0.dp,
+                                                ),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            ) {
+                                                if (
+                                                    settings.visualizer &&
+                                                        !settings.bitPerfect &&
+                                                        mediaVisible
+                                                )
+                                                    LiveMeter(vm, state.playing)
+                                                Text(
+                                                    if (state.loading)
+                                                        strings[R.string.loading_track]
+                                                    else if (state.playing)
+                                                        strings[R.string.now_playing]
+                                                    else strings[R.string.paused],
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = accent,
+                                                )
+                                            }
                                         }
                                         Text(
                                             strings.label(state.queue.context),
@@ -611,6 +706,14 @@ fun FullPlayer(
                                             val side =
                                                 minOf(maxWidth, maxHeight, limit)
                                                     .coerceAtLeast(0.dp)
+                                            val activeMorphShape =
+                                                if (settings.coverMorph && !settings.vinyl)
+                                                    MorphedCoverShape(
+                                                        pauseShape = settings.pauseCoverShape,
+                                                        playShape = settings.coverShape,
+                                                        morphFraction = coverMorphFraction,
+                                                    )
+                                                else null
                                             Box(
                                                 Modifier.size(side)
                                                     .testTag("player-artwork")
@@ -648,28 +751,36 @@ fun FullPlayer(
                                                     track.artwork,
                                                     direction = state.artworkDirection,
                                                 ) { uri ->
-                                                    Box(
-                                                        Modifier.fillMaxSize().graphicsLayer {
-                                                            rotationZ =
-                                                                if (settings.vinyl) rotation.value
-                                                                else 0f
-                                                        }
+                                                    CompositionLocalProvider(
+                                                        LocalCoverMorphShape provides
+                                                            activeMorphShape
                                                     ) {
-                                                        Artwork(
-                                                            uri,
-                                                            track.title,
-                                                            Modifier.fillMaxSize(),
-                                                            if (settings.vinyl) 1000 else 24,
-                                                        )
-                                                        if (settings.vinyl)
-                                                            Box(
-                                                                Modifier.align(Alignment.Center)
-                                                                    .size(20.dp)
-                                                                    .background(
-                                                                        background,
-                                                                        CircleShape,
-                                                                    )
+                                                        Box(
+                                                            Modifier.fillMaxSize().graphicsLayer {
+                                                                scaleX = coverPlayScale
+                                                                scaleY = coverPlayScale
+                                                                rotationZ =
+                                                                    if (settings.vinyl)
+                                                                        rotation.value
+                                                                    else coverMorphTwist
+                                                            }
+                                                        ) {
+                                                            Artwork(
+                                                                uri,
+                                                                track.title,
+                                                                Modifier.fillMaxSize(),
+                                                                if (settings.vinyl) 1000 else 24,
                                                             )
+                                                            if (settings.vinyl)
+                                                                Box(
+                                                                    Modifier.align(Alignment.Center)
+                                                                        .size(20.dp)
+                                                                        .background(
+                                                                            background,
+                                                                            CircleShape,
+                                                                        )
+                                                                )
+                                                        }
                                                     }
                                                 }
                                             }

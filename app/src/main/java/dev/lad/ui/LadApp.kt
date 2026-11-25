@@ -305,14 +305,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                 onCollection = showCollection,
                                 onAdd = add,
                                 onPlaylist = { nav.navigate("playlist/$it") },
-                                onDemo = {
-                                    recap =
-                                        Triple(
-                                            RecapGenerator.demo(tracks),
-                                            strings[R.string.demo_your_year],
-                                            true,
-                                        )
-                                },
+                                onSeasonRecap = { s, label -> recap = Triple(s, label, false) },
                             )
                         }
                         composable("library") {
@@ -390,6 +383,9 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                 tracks,
                                 runs = statsRuns,
                                 onRecap = { s, label, year -> recap = Triple(s, label, year) },
+                                onMarkSeasonSeen = { key ->
+                                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                                },
                             )
                         }
                         composable("duplicates") { DuplicatesScreen(tracks, vm) }
@@ -398,6 +394,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                 storedSettings,
                                 vm,
                                 onDuplicates = { nav.navigate("duplicates") },
+                                onSeasonRecap = { s, label -> recap = Triple(s, label, false) },
                                 onDemo = { year ->
                                     recap =
                                         Triple(

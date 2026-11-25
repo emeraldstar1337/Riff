@@ -24,6 +24,7 @@ internal fun ArtistPortrait(
     openSource: Boolean = false,
     round: Int = 20,
     fallbackArtwork: String? = null,
+    shapeOverride: androidx.compose.ui.graphics.Shape? = null,
 ) {
     val context = LocalContext.current
     val settings = LocalLadSettings.current
@@ -40,7 +41,7 @@ internal fun ArtistPortrait(
                 value = repository.find(name, tracks)
             }
         }
-    val clipShape = coverClipShape(settings.coverShape, round)
+    val clipShape = shapeOverride ?: coverClipShape(settings.coverShape, round)
     Box(
         modifier
             .clip(clipShape)

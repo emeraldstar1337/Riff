@@ -62,6 +62,9 @@ data class Settings(
     val shapeType: String = "mixed",
     val dateFormat: String = "system",
     val artistPhotos: Boolean = true,
+    val coverMorph: Boolean = true,
+    val pauseCoverShape: String = "rounded",
+    val seenSeasonRecap: String = "",
 )
 
 class SettingsStore(private val context: Context) {
@@ -110,6 +113,9 @@ class SettingsStore(private val context: Context) {
     private val shapeType = stringPreferencesKey("shapeType")
     private val shapeScale = floatPreferencesKey("shapeScale")
     private val coverTransition = stringPreferencesKey("coverTransition")
+    private val coverMorph = booleanPreferencesKey("coverMorph")
+    private val pauseCoverShape = stringPreferencesKey("pauseCoverShape")
+    private val seenSeasonRecap = stringPreferencesKey("seenSeasonRecap")
     private val historyKey = stringPreferencesKey("queue_history_v1")
     private val queueMutex = Mutex()
     private var cachedHistory: List<QueueRevision>? = null
@@ -130,7 +136,9 @@ class SettingsStore(private val context: Context) {
             p[inclusions] ?: "",
             p[accent] ?: "violet",
             p[black] ?: false,
-            p[shape]?.takeIf { it in setOf("rounded", "circle", "flower") } ?: "rounded",
+            p[shape]?.takeIf {
+                it in setOf("rounded", "squircle", "circle", "flower", "clover", "cookie", "sunny")
+            } ?: "rounded",
             p[recapCover] ?: true,
             p[ambient] ?: true,
             p[playerStyle] ?: "immersive",
@@ -155,11 +163,18 @@ class SettingsStore(private val context: Context) {
             p[lyricsDim] ?: 0.46f,
             p[mergeArtists] ?: true,
             p[bitPerfect] ?: false,
-            p[coverTransition]?.takeIf { it in setOf("fade", "zoom", "cards", "morph") } ?: "fade",
+            p[coverTransition]?.takeIf {
+                it in setOf("fade", "slide", "zoom", "cards", "morph", "none")
+            } ?: "fade",
             p[shapeScale] ?: 1f,
             p[shapeType] ?: "mixed",
             p[dateFormat] ?: "system",
             p[artistPhotos] ?: true,
+            p[coverMorph] ?: true,
+            p[pauseCoverShape]?.takeIf {
+                it in setOf("rounded", "squircle", "circle", "flower", "clover", "cookie", "sunny")
+            } ?: "rounded",
+            p[seenSeasonRecap] ?: "",
         )
 
     val settings = context.ladSettings.data.map(::readSettings).distinctUntilChanged()
@@ -231,6 +246,9 @@ class SettingsStore(private val context: Context) {
             p[shapeScale] = value.shapeScale
             p[shapeType] = value.shapeType
             p[dateFormat] = value.dateFormat
+            p[coverMorph] = value.coverMorph
+            p[pauseCoverShape] = value.pauseCoverShape
+            p[seenSeasonRecap] = value.seenSeasonRecap
         }
         return updated
     }
