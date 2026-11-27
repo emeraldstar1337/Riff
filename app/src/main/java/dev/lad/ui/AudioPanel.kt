@@ -8,10 +8,13 @@ package dev.lad.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.lad.R
 import dev.lad.data.*
@@ -43,7 +46,7 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                 Text(strings[R.string.bit_perfect_effects_bypassed])
                 FilledTonalButton(
                     onClick = { vm.updateSettings { it.copy(bitPerfect = false) } },
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.bit_perfect_disable])
                 }
@@ -51,6 +54,7 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                 Text(
                     strings[R.string.this_profile_is_saved_separately_for],
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 SettingSwitch(
                     strings[R.string.equalizer],
@@ -71,14 +75,18 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                     }
                 }
                 Surface(
-                    shape = LadShapes.card,
+                    shape = LadShapes.artwork,
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                 ) {
-                    Column(Modifier.padding(LadSpacing.medium)) {
+                    Column(
+                        Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         Text(
                             strings[R.string.bands_db],
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
                         )
                         listOf("60 Hz", "230 Hz", "910 Hz", "3.6 kHz", "14 kHz").forEachIndexed {
                             i,
@@ -91,7 +99,10 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                                 Text(
                                     label,
                                     Modifier.width(54.dp),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style =
+                                        MaterialTheme.typography.labelMedium.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
                                 )
                                 Slider(
                                     profile.bands[i],
@@ -111,47 +122,109 @@ fun AudioPanel(settings: Settings, playback: PlaybackState, vm: LadViewModel, on
                                 )
                                 Text(
                                     strings.format(R.string.signed_decimal_one, profile.bands[i]),
-                                    Modifier.width(42.dp),
-                                    style = MaterialTheme.typography.labelMedium,
+                                    Modifier.width(44.dp),
+                                    style =
+                                        MaterialTheme.typography.labelMedium.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
                                     color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
                                 )
                             }
                         }
                     }
                 }
-                Text(
-                    strings.format(
-                        R.string.balance,
-                        if (profile.balance == 0f) strings[R.string.centred]
-                        else if (profile.balance < 0) strings[R.string.left]
-                        else strings[R.string.right],
-                    )
-                )
-                SettingsSlider(
-                    strings[R.string.balance_title],
-                    strings.format(R.string.decimal_two, profile.balance),
-                    profile.balance,
-                    -1f..1f,
-                ) {
-                    save(profile.copy(balance = it))
+                // M3 Expressive segmented container for Balance & Profile Volume
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Surface(
+                        shape = segmentedItemShape(0, 2),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    strings[R.string.balance_title],
+                                    Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    if (profile.balance == 0f) strings[R.string.centred]
+                                    else strings.format(R.string.decimal_two, profile.balance),
+                                    style =
+                                        MaterialTheme.typography.labelLarge.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Slider(
+                                profile.balance,
+                                { save(profile.copy(balance = it)) },
+                                valueRange = -1f..1f,
+                            )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    strings[R.string.audio_panel_left],
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    strings[R.string.audio_panel_right],
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    Surface(
+                        shape = segmentedItemShape(1, 2),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    strings[R.string.volume],
+                                    Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    "${(profile.volume * 100).toInt()}%",
+                                    style =
+                                        MaterialTheme.typography.labelLarge.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Slider(
+                                profile.volume,
+                                { save(profile.copy(volume = it)) },
+                                valueRange = 0f..1f,
+                            )
+                        }
+                    }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(strings[R.string.audio_panel_left])
-                    Text(strings[R.string.audio_panel_right])
-                }
-                Text(strings.format(R.string.profile_volume, (profile.volume * 100).toInt()))
-                SettingsSlider(
-                    strings[R.string.volume],
-                    "${(profile.volume * 100).toInt()}%",
-                    profile.volume,
-                    0f..1f,
-                ) {
-                    save(profile.copy(volume = it))
-                }
-                TextButton(
+                OutlinedButton(
                     onClick = { save(dev.lad.domain.SoundProfile()) },
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
+                    Icon(Icons.Default.RestartAlt, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
                     Text(strings[R.string.reset_profile])
                 }
                 Spacer(Modifier.height(24.dp))

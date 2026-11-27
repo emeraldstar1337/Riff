@@ -65,6 +65,7 @@ data class Settings(
     val coverMorph: Boolean = true,
     val pauseCoverShape: String = "rounded",
     val seenSeasonRecap: String = "",
+    val navStyle: String = "bar",
 )
 
 class SettingsStore(private val context: Context) {
@@ -116,6 +117,7 @@ class SettingsStore(private val context: Context) {
     private val coverMorph = booleanPreferencesKey("coverMorph")
     private val pauseCoverShape = stringPreferencesKey("pauseCoverShape")
     private val seenSeasonRecap = stringPreferencesKey("seenSeasonRecap")
+    private val navStyle = stringPreferencesKey("navStyle")
     private val historyKey = stringPreferencesKey("queue_history_v1")
     private val queueMutex = Mutex()
     private var cachedHistory: List<QueueRevision>? = null
@@ -175,6 +177,7 @@ class SettingsStore(private val context: Context) {
                 it in setOf("rounded", "squircle", "circle", "flower", "clover", "cookie", "sunny")
             } ?: "rounded",
             p[seenSeasonRecap] ?: "",
+            p[navStyle]?.takeIf { it in setOf("bar", "dock") } ?: "bar",
         )
 
     val settings = context.ladSettings.data.map(::readSettings).distinctUntilChanged()
@@ -249,6 +252,7 @@ class SettingsStore(private val context: Context) {
             p[coverMorph] = value.coverMorph
             p[pauseCoverShape] = value.pauseCoverShape
             p[seenSeasonRecap] = value.seenSeasonRecap
+            p[navStyle] = value.navStyle
         }
         return updated
     }

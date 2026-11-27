@@ -772,6 +772,18 @@ private fun LazyListScope.navigationSettingsSection(
         )
     val selected = settings.navigationTabs.split(',').filter { it in names }.distinct()
     item { NavigationPreview(selected, names) }
+    item { SectionTitle(strings[R.string.nav_style_title]) }
+    item {
+        ChoiceChips(
+            settings.navStyle,
+            listOf(
+                "bar" to strings[R.string.nav_style_bar],
+                "dock" to strings[R.string.nav_style_dock],
+            ),
+        ) { style ->
+            onUpdate { it.copy(navStyle = style) }
+        }
+    }
     item {
         SettingsNote(
             strings[R.string.your_order],

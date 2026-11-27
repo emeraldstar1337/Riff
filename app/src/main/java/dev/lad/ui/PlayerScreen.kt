@@ -121,10 +121,9 @@ fun MiniPlayer(
                         ),
                 ) {
                     if (state.loading)
-                        CircularProgressIndicator(
-                            Modifier.size(20.dp),
+                        LoadingIndicator(
+                            Modifier.size(26.dp),
                             color = palette.onPrimary,
-                            strokeWidth = 2.dp,
                         )
                     else
                         Icon(
@@ -824,7 +823,22 @@ fun FullPlayer(
                                             )
                                         }
                                     }
-                                    IconButton({ vm.favorite(track) }) {
+                                    FilledIconToggleButton(
+                                        checked = track.favorite,
+                                        onCheckedChange = { vm.favorite(track) },
+                                        modifier = Modifier.size(48.dp),
+                                        shape =
+                                            if (track.favorite) RoundedCornerShape(16.dp)
+                                            else CircleShape,
+                                        colors =
+                                            IconButtonDefaults.filledIconToggleButtonColors(
+                                                containerColor =
+                                                    scheme.surfaceContainerHigh.copy(alpha = 0.65f),
+                                                contentColor = scheme.onSurfaceVariant,
+                                                checkedContainerColor = scheme.tertiaryContainer,
+                                                checkedContentColor = scheme.tertiary,
+                                            ),
+                                    ) {
                                         Icon(
                                             if (track.favorite) Icons.Default.Favorite
                                             else Icons.Default.FavoriteBorder,
@@ -833,37 +847,54 @@ fun FullPlayer(
                                                 scaleX = favScale.value
                                                 scaleY = favScale.value
                                             },
-                                            tint = accent,
                                         )
                                     }
                                 }
                                 FullPlayerTimeline(track, state, vm)
                                 Surface(
                                     shape = LadShapes.hero,
-                                    color = scheme.surfaceContainerLow.copy(alpha = 0.92f),
+                                    color = scheme.surfaceContainer.copy(alpha = 0.88f),
                                 ) {
+                                    val prevInteraction = remember { MutableInteractionSource() }
+                                    val nextInteraction = remember { MutableInteractionSource() }
                                     Row(
                                         Modifier.fillMaxWidth()
-                                            .padding(horizontal = 4.dp, vertical = 12.dp),
+                                            .padding(horizontal = 10.dp, vertical = 12.dp),
                                         horizontalArrangement = Arrangement.SpaceEvenly,
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        IconToggleButton(
-                                            state.queue.shuffle,
-                                            { vm.playback.shuffle(it) },
-                                            Modifier.size(48.dp),
+                                        FilledIconToggleButton(
+                                            checked = state.queue.shuffle,
+                                            onCheckedChange = { vm.playback.shuffle(it) },
+                                            modifier = Modifier.size(46.dp),
+                                            shape =
+                                                if (state.queue.shuffle) RoundedCornerShape(14.dp)
+                                                else CircleShape,
+                                            colors =
+                                                IconButtonDefaults.filledIconToggleButtonColors(
+                                                    containerColor = Color.Transparent,
+                                                    contentColor = scheme.onSurfaceVariant,
+                                                    checkedContainerColor = scheme.tertiaryContainer,
+                                                    checkedContentColor = scheme.tertiary,
+                                                ),
                                         ) {
                                             Icon(
                                                 Icons.Default.Shuffle,
                                                 strings[R.string.library_screens_shuffle],
-                                                tint =
-                                                    if (state.queue.shuffle) accent
-                                                    else scheme.onSurfaceVariant,
                                             )
                                         }
-                                        IconButton(
-                                            { vm.playback.previous() },
-                                            Modifier.size(48.dp),
+                                        FilledTonalIconButton(
+                                            onClick = { vm.playback.previous() },
+                                            modifier =
+                                                Modifier.size(54.dp)
+                                                    .expressivePress(prevInteraction, 0.92f),
+                                            shape = CircleShape,
+                                            interactionSource = prevInteraction,
+                                            colors =
+                                                IconButtonDefaults.filledTonalIconButtonColors(
+                                                    containerColor = scheme.secondaryContainer,
+                                                    contentColor = scheme.onSecondaryContainer,
+                                                ),
                                         ) {
                                             Icon(
                                                 Icons.Default.SkipPrevious,
@@ -880,10 +911,9 @@ fun FullPlayer(
                                             interactionSource = playInteraction,
                                         ) {
                                             if (state.loading)
-                                                CircularProgressIndicator(
-                                                    Modifier.size(28.dp),
+                                                LoadingIndicator(
+                                                    Modifier.size(34.dp),
                                                     color = scheme.onPrimary,
-                                                    strokeWidth = 2.dp,
                                                 )
                                             else
                                                 Crossfade(
@@ -901,17 +931,40 @@ fun FullPlayer(
                                                     )
                                                 }
                                         }
-                                        IconButton({ vm.playback.next() }, Modifier.size(48.dp)) {
+                                        FilledTonalIconButton(
+                                            onClick = { vm.playback.next() },
+                                            modifier =
+                                                Modifier.size(54.dp)
+                                                    .expressivePress(nextInteraction, 0.92f),
+                                            shape = CircleShape,
+                                            interactionSource = nextInteraction,
+                                            colors =
+                                                IconButtonDefaults.filledTonalIconButtonColors(
+                                                    containerColor = scheme.secondaryContainer,
+                                                    contentColor = scheme.onSecondaryContainer,
+                                                ),
+                                        ) {
                                             Icon(
                                                 Icons.Default.SkipNext,
                                                 strings[R.string.next],
                                                 Modifier.size(28.dp),
                                             )
                                         }
-                                        IconToggleButton(
-                                            state.queue.repeat != RepeatMode.OFF,
-                                            { vm.playback.repeat() },
-                                            Modifier.size(48.dp),
+                                        val repeatActive = state.queue.repeat != RepeatMode.OFF
+                                        FilledIconToggleButton(
+                                            checked = repeatActive,
+                                            onCheckedChange = { vm.playback.repeat() },
+                                            modifier = Modifier.size(46.dp),
+                                            shape =
+                                                if (repeatActive) RoundedCornerShape(14.dp)
+                                                else CircleShape,
+                                            colors =
+                                                IconButtonDefaults.filledIconToggleButtonColors(
+                                                    containerColor = Color.Transparent,
+                                                    contentColor = scheme.onSurfaceVariant,
+                                                    checkedContainerColor = scheme.tertiaryContainer,
+                                                    checkedContentColor = scheme.tertiary,
+                                                ),
                                         ) {
                                             Icon(
                                                 if (state.queue.repeat == RepeatMode.ONE)
@@ -926,9 +979,6 @@ fun FullPlayer(
                                                             RepeatMode.QUEUE -> R.string.queue
                                                         }],
                                                 ),
-                                                tint =
-                                                    if (state.queue.repeat != RepeatMode.OFF) accent
-                                                    else scheme.onSurfaceVariant,
                                             )
                                         }
                                     }
@@ -1262,7 +1312,7 @@ internal fun QueueSheet(
                 LazyColumn(
                     Modifier.fillMaxWidth().weight(1f).clipToBounds().testTag("queue-list"),
                     contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     itemsIndexed(
                         upcoming,
@@ -1271,7 +1321,7 @@ internal fun QueueSheet(
                         val index = state.queue.index + n + 1
                         lookup[entry.trackId]?.let { t ->
                             Surface(
-                                shape = LadShapes.card,
+                                shape = segmentedItemShape(n, upcoming.size),
                                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                             ) {
                                 Row(
@@ -1446,23 +1496,29 @@ private fun FullPlayerTimeline(track: Track, state: PlaybackState, vm: LadViewMo
 
 @Composable
 private fun MiniProgress(state: PlaybackState, palette: ColorScheme, vm: LadViewModel?) {
+    val settings = LocalLadSettings.current
     val clock = if (vm != null) vm.playback.state.collectAsStateWithLifecycle().value else state
     val progress =
         if (clock.durationMs > 0) (clock.positionMs.toFloat() / clock.durationMs).coerceIn(0f, 1f)
         else 0f
-    Canvas(Modifier.fillMaxWidth().height(2.dp)) {
-        drawLine(
-            palette.primary.copy(alpha = 0.13f),
-            Offset.Zero,
-            Offset(size.width, 0f),
-            strokeWidth = size.height,
-        )
-        drawLine(
-            palette.primary,
-            Offset.Zero,
-            Offset(size.width * progress, 0f),
-            strokeWidth = size.height,
-        )
+    Box(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 6.dp)) {
+        if (settings.seekStyle.startsWith("wave")) {
+            LinearWavyProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                color = palette.primary,
+                trackColor = palette.primary.copy(alpha = 0.16f),
+                amplitude = { if (clock.playing && settings.animations) 0.55f else 0f },
+                wavelength = 18.dp,
+            )
+        } else {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(3.dp),
+                color = palette.primary,
+                trackColor = palette.primary.copy(alpha = 0.16f),
+            )
+        }
     }
 }
 

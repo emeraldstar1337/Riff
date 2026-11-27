@@ -349,7 +349,7 @@ fun LyricsContent(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                            LoadingIndicator(Modifier.size(44.dp))
                             Text(
                                 strings[R.string.finding_synced_lyrics],
                                 style = MaterialTheme.typography.bodyMedium,
@@ -559,8 +559,7 @@ fun LyricsContent(
                         enabled = !busy && title.isNotBlank(),
                         shapes = androidx.compose.material3.ButtonDefaults.shapes(),
                     ) {
-                        if (busy)
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        if (busy) LoadingIndicator(Modifier.size(22.dp))
                         else Text(strings[R.string.lyrics_panel_search])
                     }
                     searchError?.let {

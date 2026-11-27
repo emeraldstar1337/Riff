@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+)
 
 package dev.lad.ui
 
@@ -9,7 +12,6 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -19,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -33,9 +36,11 @@ import dev.lad.data.*
 import dev.lad.domain.albumKey
 import dev.lad.i18n.rememberText
 import dev.lad.statistics.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LadApp(vm: LadViewModel = viewModel()) {
@@ -43,6 +48,7 @@ fun LadApp(vm: LadViewModel = viewModel()) {
     val storedSettings by vm.settingsState.settings.collectAsStateWithLifecycle()
     val tracks by vm.libraryState.tracks.collectAsStateWithLifecycle()
     val playlists by vm.playlistsState.playlists.collectAsStateWithLifecycle()
+    val appHistory by vm.statisticsState.history.collectAsStateWithLifecycle()
     val stablePlayback =
         remember(vm) {
             vm.playerState.playback.state
@@ -145,6 +151,39 @@ fun LadApp(vm: LadViewModel = viewModel()) {
         if (route in listOf("home", "library", "playlists", "stats") && route !in tabs)
             nav.navigate(tabs.first()) { launchSingleTop = true }
     }
+    val hasSeasonBadge by
+        produceState(
+            false,
+            appHistory,
+            storedSettings.statistics,
+            storedSettings.seenSeasonRecap,
+            storedSettings.mergeArtists,
+        ) {
+            value =
+                if (!storedSettings.statistics || appHistory.isEmpty()) false
+                else
+                    withContext(Dispatchers.Default) {
+                        val completed = RecapGenerator.completedSeason()
+                        if (storedSettings.seenSeasonRecap == completed.key) false
+                        else
+                            RecapGenerator.aggregate(
+                                appHistory,
+                                completed.window,
+                                mergeArtists = storedSettings.mergeArtists,
+                            )
+                                .plays > 0
+                    }
+        }
+    val isTopLevel = route in listOf("home", "library", "playlists", "stats")
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val smallScrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    LaunchedEffect(route) {
+        scrollBehavior.state.heightOffset = 0f
+        scrollBehavior.state.contentOffset = 0f
+        smallScrollBehavior.state.heightOffset = 0f
+        smallScrollBehavior.state.contentOffset = 0f
+    }
+
     LadTheme(settings) {
         CompositionLocalProvider(LocalTrackDetails provides vm::showDetails) {
             val add: (Track) -> Unit = { addTrack = it }
@@ -158,13 +197,35 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                 artistIds = list.map { it.id }.toLongArray()
                 nav.navigate("artist")
             }
-            Scaffold(
-                snackbarHost = { SnackbarHost(snack) },
-                topBar = {
-                    if (recap == null)
-                        TopAppBar(
-                            title = {
-                                Text(
+            val onTabSelect: (String) -> Unit = { r ->
+                nav.navigate(r) {
+                    popUpTo(nav.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val useNavRail = maxWidth >= 600.dp && isTopLevel && recap == null
+                Row(Modifier.fillMaxSize()) {
+                    if (useNavRail) {
+                        AdaptiveNavRail(
+                            tabs = tabs,
+                            selected = route,
+                            onSelect = onTabSelect,
+                            statsBadge = hasSeasonBadge,
+                        )
+                    }
+                    Scaffold(
+                        modifier =
+                            Modifier.weight(1f)
+                                .nestedScroll(
+                                    if (isTopLevel) scrollBehavior.nestedScrollConnection
+                                    else smallScrollBehavior.nestedScrollConnection
+                                ),
+                        snackbarHost = { SnackbarHost(snack) },
+                        topBar = {
+                            if (recap == null) {
+                                val titleText =
                                     when (route) {
                                         "home" -> strings[R.string.lad]
                                         "library" -> strings[R.string.library]
@@ -179,251 +240,301 @@ fun LadApp(vm: LadViewModel = viewModel()) {
                                         "artist" -> artistName
                                         "duplicates" -> strings[R.string.duplicates]
                                         else -> strings[R.string.playlist]
-                                    },
-                                    fontWeight = FontWeight.Black,
-                                    style =
-                                        if (route in tabs) MaterialTheme.typography.headlineLarge
-                                        else MaterialTheme.typography.titleLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            navigationIcon = {
-                                if (route !in listOf("home", "library", "playlists", "stats"))
-                                    IconButton(
-                                        onClick = {
-                                            backDispatcher?.onBackPressed() ?: nav.popBackStack()
-                                        }
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowBack,
-                                            strings[R.string.back],
-                                        )
                                     }
-                            },
-                            actions = {
-                                if (route != "search" && route != "settings")
-                                    IconButton(
-                                        onClick = {
-                                            nav.navigate("search") { launchSingleTop = true }
-                                        }
-                                    ) {
-                                        Icon(Icons.Default.Search, strings[R.string.search])
+                                val subtitleText =
+                                    when (route) {
+                                        "library" ->
+                                            strings.plural(
+                                                R.plurals.tracks,
+                                                tracks.size,
+                                                tracks.size,
+                                            )
+                                        "playlists" ->
+                                            if (playlists.isNotEmpty())
+                                                "${playlists.size}"
+                                            else ""
+                                        else -> ""
                                     }
-                                if (route != "settings")
-                                    IconButton(
-                                        onClick = {
-                                            nav.navigate("settings") { launchSingleTop = true }
-                                        }
-                                    ) {
-                                        Icon(Icons.Default.Settings, strings[R.string.settings])
-                                    }
-                            },
-                            expandedHeight = if (route in tabs) 80.dp else 64.dp,
-                            colors =
-                                TopAppBarDefaults.topAppBarColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                ),
-                        )
-                },
-                bottomBar = {
-                    if (recap == null)
-                        Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
-                            if (playback.current != null)
-                                MiniPlayer(
-                                    playback,
-                                    onOpen = { playerOpen = true },
-                                    onToggle = { vm.playback.toggle() },
-                                    onNext = { vm.playback.next() },
-                                    vm = vm,
-                                )
-                            if (route in listOf("home", "library", "playlists", "stats"))
-                                FloatingDock(
-                                    tabs,
-                                    route,
-                                    onSelect = { r ->
-                                        nav.navigate(r) {
-                                            popUpTo(nav.graph.startDestinationId) {
-                                                saveState = true
+                                val topBarColors =
+                                    TopAppBarDefaults.topAppBarColors(
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                        scrolledContainerColor =
+                                            MaterialTheme.colorScheme.surfaceContainer,
+                                    )
+                                val topActions: @Composable RowScope.() -> Unit = {
+                                    if (route != "search" && route != "settings")
+                                        IconButton(
+                                            onClick = {
+                                                nav.navigate("search") { launchSingleTop = true }
                                             }
-                                            launchSingleTop = true
-                                            restoreState = true
+                                        ) {
+                                            Icon(Icons.Default.Search, strings[R.string.search])
                                         }
-                                    },
-                                )
-                            else Spacer(Modifier.navigationBarsPadding())
-                        }
-                },
-            ) { padding ->
-                if (recap != null) {
-                    val value = recap!!
-                    RecapScreen(
-                        value.first,
-                        value.second,
-                        value.third,
-                        onClose = { recap = null },
-                        animations = settings.animations,
-                        settings = settings,
-                        tracks = tracks,
-                    )
-                } else
-                    NavHost(
-                        navController = nav,
-                        startDestination = "home",
-                        enterTransition = {
-                            fadeIn(LadMotion.defaultEffects(settings.animations)) +
-                                slideInVertically(LadMotion.defaultSpatial(settings.animations)) {
-                                    it / 16
+                                    if (route != "settings")
+                                        IconButton(
+                                            onClick = {
+                                                nav.navigate("settings") { launchSingleTop = true }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.Settings, strings[R.string.settings])
+                                        }
                                 }
-                        },
-                        exitTransition = {
-                            fadeOut(LadMotion.fastEffects(settings.animations))
-                        },
-                        popEnterTransition = {
-                            fadeIn(LadMotion.defaultEffects(settings.animations))
-                        },
-                        popExitTransition = {
-                            fadeOut(LadMotion.fastEffects(settings.animations)) +
-                                slideOutVertically(LadMotion.fastSpatial(settings.animations)) {
-                                    it / 18
+                                if (isTopLevel) {
+                                    MediumFlexibleTopAppBar(
+                                        title = {
+                                            Text(
+                                                titleText,
+                                                fontWeight = FontWeight.Black,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                        subtitle =
+                                            if (subtitleText.isNotBlank()) {
+                                                {
+                                                    Text(
+                                                        subtitleText,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+                                            } else null,
+                                        actions = topActions,
+                                        colors = topBarColors,
+                                        scrollBehavior = scrollBehavior,
+                                    )
+                                } else {
+                                    TopAppBar(
+                                        title = {
+                                            Text(
+                                                titleText,
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                        navigationIcon = {
+                                            IconButton(
+                                                onClick = {
+                                                    backDispatcher?.onBackPressed()
+                                                        ?: nav.popBackStack()
+                                                }
+                                            ) {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                                    strings[R.string.back],
+                                                )
+                                            }
+                                        },
+                                        actions = topActions,
+                                        colors = topBarColors,
+                                        scrollBehavior = smallScrollBehavior,
+                                    )
                                 }
-                        },
-                        modifier = Modifier.padding(padding),
-                    ) {
-                        composable("home") {
-                            val homeHistory by
-                                vm.statisticsState.history.collectAsStateWithLifecycle()
-                            HomeScreen(
-                                tracks,
-                                playlists,
-                                homeHistory,
-                                playback.current?.id,
-                                vm,
-                                permitted,
-                                scanning,
-                                permission,
-                                onCollection = showCollection,
-                                onAdd = add,
-                                onPlaylist = { nav.navigate("playlist/$it") },
-                                onSeasonRecap = { s, label -> recap = Triple(s, label, false) },
-                            )
-                        }
-                        composable("library") {
-                            LibraryScreen(
-                                tracks,
-                                playback.current?.id,
-                                vm,
-                                permitted,
-                                scanning,
-                                permission,
-                                showCollection,
-                                add,
-                                onArtist = showArtist,
-                            )
-                        }
-                        composable("playlists") {
-                            PlaylistsScreen(
-                                playlists,
-                                tracks,
-                                onSave = vm::savePlaylist,
-                                onOpen = { nav.navigate("playlist/$it") },
-                            )
-                        }
-                        composable("playlist/{id}") { e ->
-                            val p =
-                                playlists.firstOrNull {
-                                    it.id == e.arguments?.getString("id")?.toLongOrNull()
-                                }
-                            if (p != null)
-                                PlaylistScreen(
-                                    p,
-                                    tracks,
-                                    playback.current?.id,
-                                    vm,
-                                    add,
-                                    onDeleted = { nav.popBackStack() },
-                                )
-                        }
-                        composable("artist") {
-                            val rows = artistIds.asSequence().mapNotNull { lookup[it] }.toList()
-                            val albums =
-                                remember(rows, tracks) {
-                                    val keys = rows.map { it.albumKey() }.toSet()
-                                    tracks.filter { it.albumKey() in keys }
-                                }
-                            TrackListScreen(
-                                artistName,
-                                rows,
-                                playback.current?.id,
-                                vm,
-                                add,
-                                showCover = true,
-                                onAlbum = showCollection,
-                                albumTracks = albums,
-                            )
-                        }
-                        composable("collection") {
-                            collection.let { (name, list) ->
-                                TrackListScreen(
-                                    name,
-                                    list.mapNotNull { old -> lookup[old.id] },
-                                    playback.current?.id,
-                                    vm,
-                                    add,
-                                    showCover = true,
-                                )
                             }
-                        }
-                        composable("stats") {
-                            val statsHistory by
-                                vm.statisticsState.history.collectAsStateWithLifecycle()
-                            val statsRuns by vm.statisticsState.runs.collectAsStateWithLifecycle()
-                            StatisticsScreen(
-                                statsHistory,
-                                tracks,
-                                runs = statsRuns,
-                                onRecap = { s, label, year -> recap = Triple(s, label, year) },
-                                onMarkSeasonSeen = { key ->
-                                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
-                                },
-                            )
-                        }
-                        composable("duplicates") { DuplicatesScreen(tracks, vm) }
-                        composable("settings") {
-                            SettingsScreen(
-                                storedSettings,
-                                vm,
-                                onDuplicates = { nav.navigate("duplicates") },
-                                onSeasonRecap = { s, label -> recap = Triple(s, label, false) },
-                                onDemo = { year ->
-                                    recap =
-                                        Triple(
-                                            RecapGenerator.demo(tracks),
-                                            if (year) strings[R.string.demo_your_year]
-                                            else strings[R.string.demo_your_summer],
-                                            year,
+                        },
+                        bottomBar = {
+                            if (recap == null)
+                                Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                                    if (playback.current != null)
+                                        MiniPlayer(
+                                            playback,
+                                            onOpen = { playerOpen = true },
+                                            onToggle = { vm.playback.toggle() },
+                                            onNext = { vm.playback.next() },
+                                            vm = vm,
                                         )
+                                    if (isTopLevel && !useNavRail)
+                                        FloatingDock(
+                                            tabs = tabs,
+                                            selected = route,
+                                            onSelect = onTabSelect,
+                                            navStyle = storedSettings.navStyle,
+                                            statsBadge = hasSeasonBadge,
+                                        )
+                                    else Spacer(Modifier.navigationBarsPadding())
+                                }
+                        },
+                    ) { padding ->
+                        if (recap != null) {
+                            val value = recap!!
+                            RecapScreen(
+                                value.first,
+                                value.second,
+                                value.third,
+                                onClose = { recap = null },
+                                animations = settings.animations,
+                                settings = settings,
+                                tracks = tracks,
+                            )
+                        } else
+                            NavHost(
+                                navController = nav,
+                                startDestination = "home",
+                                enterTransition = {
+                                    fadeIn(LadMotion.defaultEffects(settings.animations)) +
+                                        slideInVertically(
+                                            LadMotion.defaultSpatial(settings.animations)
+                                        ) {
+                                            it / 16
+                                        }
                                 },
-                            )
-                        }
-                        composable("search") {
-                            SearchScreen(
-                                tracks,
-                                playlists,
-                                playback.current?.id,
-                                vm,
-                                showCollection,
-                                add,
-                                onArtist = showArtist,
-                                onPlaylist = { nav.navigate("playlist/$it") },
-                            )
-                        }
+                                exitTransition = {
+                                    fadeOut(LadMotion.fastEffects(settings.animations))
+                                },
+                                popEnterTransition = {
+                                    fadeIn(LadMotion.defaultEffects(settings.animations))
+                                },
+                                popExitTransition = {
+                                    fadeOut(LadMotion.fastEffects(settings.animations)) +
+                                        slideOutVertically(
+                                            LadMotion.fastSpatial(settings.animations)
+                                        ) {
+                                            it / 18
+                                        }
+                                },
+                                modifier = Modifier.padding(padding),
+                            ) {
+                                composable("home") {
+                                    HomeScreen(
+                                        tracks,
+                                        playlists,
+                                        appHistory,
+                                        playback.current?.id,
+                                        vm,
+                                        permitted,
+                                        scanning,
+                                        permission,
+                                        onCollection = showCollection,
+                                        onAdd = add,
+                                        onPlaylist = { nav.navigate("playlist/$it") },
+                                        onSeasonRecap = { s, label ->
+                                            recap = Triple(s, label, false)
+                                        },
+                                    )
+                                }
+                                composable("library") {
+                                    LibraryScreen(
+                                        tracks,
+                                        playback.current?.id,
+                                        vm,
+                                        permitted,
+                                        scanning,
+                                        permission,
+                                        showCollection,
+                                        add,
+                                        onArtist = showArtist,
+                                    )
+                                }
+                                composable("playlists") {
+                                    PlaylistsScreen(
+                                        playlists,
+                                        tracks,
+                                        onSave = vm::savePlaylist,
+                                        onOpen = { nav.navigate("playlist/$it") },
+                                    )
+                                }
+                                composable("playlist/{id}") { e ->
+                                    val p =
+                                        playlists.firstOrNull {
+                                            it.id == e.arguments?.getString("id")?.toLongOrNull()
+                                        }
+                                    if (p != null)
+                                        PlaylistScreen(
+                                            p,
+                                            tracks,
+                                            playback.current?.id,
+                                            vm,
+                                            add,
+                                            onDeleted = { nav.popBackStack() },
+                                        )
+                                }
+                                composable("artist") {
+                                    val rows =
+                                        artistIds.asSequence().mapNotNull { lookup[it] }.toList()
+                                    val albums =
+                                        remember(rows, tracks) {
+                                            val keys = rows.map { it.albumKey() }.toSet()
+                                            tracks.filter { it.albumKey() in keys }
+                                        }
+                                    TrackListScreen(
+                                        artistName,
+                                        rows,
+                                        playback.current?.id,
+                                        vm,
+                                        add,
+                                        showCover = true,
+                                        onAlbum = showCollection,
+                                        albumTracks = albums,
+                                    )
+                                }
+                                composable("collection") {
+                                    collection.let { (name, list) ->
+                                        TrackListScreen(
+                                            name,
+                                            list.mapNotNull { old -> lookup[old.id] },
+                                            playback.current?.id,
+                                            vm,
+                                            add,
+                                            showCover = true,
+                                        )
+                                    }
+                                }
+                                composable("stats") {
+                                    val statsRuns by
+                                        vm.statisticsState.runs.collectAsStateWithLifecycle()
+                                    StatisticsScreen(
+                                        appHistory,
+                                        tracks,
+                                        runs = statsRuns,
+                                        onRecap = { s, label, year ->
+                                            recap = Triple(s, label, year)
+                                        },
+                                        onMarkSeasonSeen = { key ->
+                                            vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                                        },
+                                    )
+                                }
+                                composable("duplicates") { DuplicatesScreen(tracks, vm) }
+                                composable("settings") {
+                                    SettingsScreen(
+                                        storedSettings,
+                                        vm,
+                                        onDuplicates = { nav.navigate("duplicates") },
+                                        onSeasonRecap = { s, label ->
+                                            recap = Triple(s, label, false)
+                                        },
+                                        onDemo = { year ->
+                                            recap =
+                                                Triple(
+                                                    RecapGenerator.demo(tracks),
+                                                    if (year) strings[R.string.demo_your_year]
+                                                    else strings[R.string.demo_your_summer],
+                                                    year,
+                                                )
+                                        },
+                                    )
+                                }
+                                composable("search") {
+                                    SearchScreen(
+                                        tracks,
+                                        playlists,
+                                        playback.current?.id,
+                                        vm,
+                                        showCollection,
+                                        add,
+                                        onArtist = showArtist,
+                                        onPlaylist = { nav.navigate("playlist/$it") },
+                                    )
+                                }
+                            }
                     }
+                }
             }
             if (!playerOpen) {
                 detail?.let {
-                    val detailHistory by vm.statisticsState.history.collectAsStateWithLifecycle()
-                    TrackDetailsPanel(it, detailHistory, vm) { vm.selectedDetails.value = null }
+                    TrackDetailsPanel(it, appHistory, vm) { vm.selectedDetails.value = null }
                 }
                 if (audioOpen) AudioPanel(settings, playback, vm) { vm.audioOpen.value = false }
             }

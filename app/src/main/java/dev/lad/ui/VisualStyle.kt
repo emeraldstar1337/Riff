@@ -106,29 +106,109 @@ fun ambientShapeColor(seed: Color, dark: Boolean): Color {
     return lerp(seed, if (dark) Color.White else Color.Black, amount)
 }
 
+private fun shiftHue(color: Color, degrees: Float, saturationScale: Float = 1f): Color {
+    val r = color.red
+    val g = color.green
+    val b = color.blue
+    val max = maxOf(r, g, b)
+    val min = minOf(r, g, b)
+    val l = (max + min) / 2f
+    val d = max - min
+    if (d < 1e-4f) return color
+    val s = (if (l > 0.5f) d / (2f - max - min) else d / (max + min)).coerceIn(0f, 1f)
+    var h =
+        when (max) {
+            r -> ((g - b) / d + (if (g < b) 6f else 0f)) * 60f
+            g -> ((b - r) / d + 2f) * 60f
+            else -> ((r - g) / d + 4f) * 60f
+        }
+    h = ((h + degrees) % 360f + 360f) % 360f
+    val ns = (s * saturationScale).coerceIn(0f, 1f)
+    val c = (1f - abs(2f * l - 1f)) * ns
+    val x = c * (1f - abs((h / 60f) % 2f - 1f))
+    val m = l - c / 2f
+    val (r1, g1, b1) =
+        when {
+            h < 60f -> Triple(c, x, 0f)
+            h < 120f -> Triple(x, c, 0f)
+            h < 180f -> Triple(0f, c, x)
+            h < 240f -> Triple(0f, x, c)
+            h < 300f -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+    return Color(
+        (r1 + m).coerceIn(0f, 1f),
+        (g1 + m).coerceIn(0f, 1f),
+        (b1 + m).coerceIn(0f, 1f),
+        color.alpha,
+    )
+}
+
+private fun ensureContrast(foreground: Color, background: Color, dark: Boolean, minRatio: Float = 4.6f): Color {
+    var result = foreground
+    val target = if (dark) Color.White else Color.Black
+    repeat(12) {
+        val ratio =
+            (maxOf(result.luminance(), background.luminance()) + 0.05f) /
+                (minOf(result.luminance(), background.luminance()) + 0.05f)
+        if (ratio >= minRatio) return result
+        result = lerp(result, target, 0.12f)
+    }
+    return result
+}
+
+private fun onColorFor(container: Color): Color =
+    if (container.luminance() > 0.179f) Color(0xFF101318) else Color(0xFFF6F7FB)
+
 fun coverScheme(seed: Color, base: ColorScheme): ColorScheme {
     val dark = base.surface.luminance() < 0.4f
-    val surface = lerp(base.surface, seed, if (dark) 0.12f else 0.07f)
-    var primary = lerp(seed, if (dark) Color.White else Color.Black, if (dark) 0.38f else 0.18f)
-    repeat(10) {
-        val contrast =
-            (maxOf(primary.luminance(), surface.luminance()) + .05f) /
-                (minOf(primary.luminance(), surface.luminance()) + .05f)
-        if (contrast < 4.5f) primary = lerp(primary, if (dark) Color.White else Color.Black, .1f)
-    }
-    val container = lerp(surface, seed, if (dark) 0.24f else 0.15f)
+    val surface = lerp(base.surface, seed, if (dark) 0.10f else 0.05f)
+    val secondarySeed = shiftHue(seed, 18f, 0.52f)
+    val tertiarySeed = shiftHue(seed, 58f, 0.90f)
+
+    val primary =
+        ensureContrast(
+            lerp(seed, if (dark) Color.White else Color.Black, if (dark) 0.36f else 0.20f),
+            surface,
+            dark,
+        )
+    val secondary =
+        ensureContrast(
+            lerp(secondarySeed, if (dark) Color.White else Color.Black, if (dark) 0.38f else 0.22f),
+            surface,
+            dark,
+        )
+    val tertiary =
+        ensureContrast(
+            lerp(tertiarySeed, if (dark) Color.White else Color.Black, if (dark) 0.36f else 0.18f),
+            surface,
+            dark,
+        )
+
+    val primaryContainer = lerp(surface, seed, if (dark) 0.26f else 0.16f)
+    val secondaryContainer = lerp(surface, secondarySeed, if (dark) 0.20f else 0.13f)
+    val tertiaryContainer = lerp(surface, tertiarySeed, if (dark) 0.25f else 0.16f)
+
     return base.copy(
         primary = primary,
-        onPrimary = if (primary.luminance() > 0.179f) Color.Black else Color.White,
-        primaryContainer = container,
-        onPrimaryContainer = base.onSurface,
-        secondaryContainer = container,
-        onSecondaryContainer = base.onSurface,
+        onPrimary = onColorFor(primary),
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = ensureContrast(base.onSurface, primaryContainer, dark),
+        secondary = secondary,
+        onSecondary = onColorFor(secondary),
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = ensureContrast(base.onSurface, secondaryContainer, dark),
+        tertiary = tertiary,
+        onTertiary = onColorFor(tertiary),
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = ensureContrast(base.onSurface, tertiaryContainer, dark),
         surface = surface,
         background = surface,
-        surfaceContainer = lerp(surface, seed, 0.06f),
-        surfaceContainerLow = surface,
-        surfaceContainerHigh = lerp(surface, seed, 0.1f),
+        surfaceContainerLowest = lerp(surface, if (dark) Color.Black else Color.White, 0.28f),
+        surfaceContainerLow = lerp(surface, seed, if (dark) 0.05f else 0.03f),
+        surfaceContainer = lerp(surface, seed, if (dark) 0.10f else 0.06f),
+        surfaceContainerHigh = lerp(surface, seed, if (dark) 0.15f else 0.09f),
+        surfaceContainerHighest = lerp(surface, seed, if (dark) 0.21f else 0.13f),
     )
 }
 

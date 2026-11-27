@@ -328,13 +328,18 @@ fun TrackDetailsPanel(track: Track, history: List<Listen>, vm: LadViewModel, onC
 }
 
 @Composable
-fun InfoTile(label: String, value: String, modifier: Modifier = Modifier) {
+fun InfoTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    shape: androidx.compose.ui.graphics.Shape = LadShapes.card,
+) {
     Surface(
         modifier.fillMaxWidth(),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 label,
                 style = MaterialTheme.typography.labelLarge,

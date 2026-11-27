@@ -193,6 +193,7 @@ fun TrackRow(
     onFavorite: () -> Unit,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val strings = rememberText()
@@ -220,7 +221,7 @@ fun TrackRow(
         else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(corner),
+        shape = if (active) RoundedCornerShape(corner) else (shape ?: RoundedCornerShape(corner)),
         color = container,
         contentColor = contentColor,
         onClick = onClick,

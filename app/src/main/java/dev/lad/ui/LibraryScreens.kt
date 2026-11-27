@@ -1,21 +1,33 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package dev.lad.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,6 +87,7 @@ fun HomeScreen(
                 .mapNotNull { byId[it.key] }
                 .take(12)
         }
+    val albums = remember(tracks) { groupAlbums(tracks).take(10) }
     val featured = byId[current] ?: recent.firstOrNull() ?: frequent.firstOrNull() ?: tracks.first()
     val album =
         remember(tracks, featured.albumKey()) {
@@ -83,192 +96,328 @@ fun HomeScreen(
     val seed = artworkSeed(featured.artwork, LocalLadSettings.current.artworkColor)
     val baseScheme = MaterialTheme.colorScheme
     val palette = remember(seed, baseScheme) { seed?.let { coverScheme(it, baseScheme) } ?: baseScheme }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+    val pullState = rememberPullToRefreshState()
+
+    PullToRefreshBox(
+        isRefreshing = scanning,
+        onRefresh = { vm.refresh(false) },
+        state = pullState,
+        indicator = {
+            PullToRefreshDefaults.LoadingIndicator(
+                state = pullState,
+                isRefreshing = scanning,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        },
+        modifier = Modifier.fillMaxSize(),
     ) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    strings[R.string.your_rhythm_today],
-                    style = MaterialTheme.typography.labelSmall,
-                    color = palette.primary,
-                )
-                Text(
-                    strings.plural(R.plurals.tracks, tracks.size, tracks.size),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        strings[R.string.your_rhythm_today],
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        strings.plural(R.plurals.tracks, tracks.size, tracks.size),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item("season-recap-prompt") {
+                SeasonRecapPromptCard(
+                    history = history,
+                    settings = LocalLadSettings.current,
+                    onOpen = { stats, label, key ->
+                        vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                        onSeasonRecap(stats, label)
+                    },
+                    onDismiss = { key ->
+                        vm.updateSettings { it.copy(seenSeasonRecap = key) }
+                    },
                 )
             }
-        }
-        item("season-recap-prompt") {
-            SeasonRecapPromptCard(
-                history = history,
-                settings = LocalLadSettings.current,
-                onOpen = { stats, label, key ->
-                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
-                    onSeasonRecap(stats, label)
-                },
-                onDismiss = { key ->
-                    vm.updateSettings { it.copy(seenSeasonRecap = key) }
-                },
-            )
-        }
-        item {
-            BitsReveal(key = featured.albumKey()) {
-                Card(
-                    onClick = { onCollection("${featured.album} • ${featured.artist}", album) },
-                    shape = LadShapes.hero,
-                    colors =
-                        CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                        ),
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Artwork(
-                            featured.artwork,
-                            featured.album,
-                            Modifier.fillMaxWidth().aspectRatio(1.16f),
-                            20,
+            item {
+                BitsReveal(key = featured.albumKey()) {
+                    Card(
+                        onClick = { onCollection("${featured.album} • ${featured.artist}", album) },
+                        shape = LadShapes.hero,
+                        colors =
+                            CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Artwork(
+                                featured.artwork,
+                                featured.album,
+                                Modifier.fillMaxWidth().aspectRatio(1.16f),
+                                20,
+                            )
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .padding(start = 6.dp, end = 4.dp, top = 16.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        strings.plural(
+                                            R.plurals.album_tracks,
+                                            album.size,
+                                            album.size,
+                                            if (featured.year > 0) " · ${featured.year}" else "",
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = palette.primary,
+                                    )
+                                    Text(
+                                        featured.album,
+                                        style = MaterialTheme.typography.headlineLarge,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        featured.artist,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                FilledIconButton(
+                                    { vm.play(album.first(), album, featured.album, true, false) },
+                                    Modifier.size(64.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors =
+                                        IconButtonDefaults.filledIconButtonColors(
+                                            containerColor = palette.primary,
+                                            contentColor = palette.onPrimary,
+                                        ),
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        strings[R.string.play_album],
+                                        Modifier.size(32.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val favoriteCount = tracks.count { it.favorite }
+                    QuickCollection(
+                        title = strings[R.string.favourites],
+                        subtitle = strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
+                        icon = Icons.Default.Favorite,
+                        badgeShape = FlowerShape,
+                        badgeColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        badgeContentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        onCollection(strings[R.string.favourites], tracks.filter { it.favorite })
+                    }
+                    QuickCollection(
+                        title = strings[R.string.new_music],
+                        subtitle = strings[R.string.in_your_library],
+                        icon = Icons.Default.AutoAwesome,
+                        badgeShape = CloverShape,
+                        badgeColor = MaterialTheme.colorScheme.secondaryContainer,
+                        badgeContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        onCollection(
+                            strings[R.string.recently_added],
+                            tracks.sortedByDescending { it.addedAt },
                         )
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .padding(start = 6.dp, end = 4.dp, top = 16.dp, bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    }
+                }
+            }
+            // M3 Expressive Multi-Browse Carousel: Recently played (or Albums showcase when history is fresh)
+            if (recent.isNotEmpty()) {
+                item { SectionTitle(strings[R.string.recently_played]) }
+                item("recent-carousel") {
+                    val state = rememberCarouselState { recent.size }
+                    HorizontalMultiBrowseCarousel(
+                        state = state,
+                        preferredItemWidth = 172.dp,
+                        itemSpacing = 10.dp,
+                        modifier = Modifier.fillMaxWidth().height(184.dp),
+                    ) { idx ->
+                        val t = recent[idx]
+                        Box(
+                            Modifier.fillMaxSize()
+                                .maskClip(RoundedCornerShape(28.dp))
+                                .clickable {
+                                    vm.play(t, recent, strings[R.string.recently_played])
+                                }
                         ) {
-                            Column(Modifier.weight(1f)) {
+                            Artwork(t.artwork, t.title, Modifier.fillMaxSize(), 0)
+                            Box(
+                                Modifier.fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.35f to Color.Transparent,
+                                            1f to Color.Black.copy(alpha = 0.78f),
+                                        )
+                                    )
+                            )
+                            Column(
+                                Modifier.align(Alignment.BottomStart).padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
                                 Text(
-                                    strings.plural(
-                                        R.plurals.album_tracks,
-                                        album.size,
-                                        album.size,
-                                        if (featured.year > 0) " · ${featured.year}" else "",
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = palette.primary,
-                                )
-                                Text(
-                                    featured.album,
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    maxLines = 2,
+                                    strings.metadata(t.title),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    featured.artist,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    strings.metadata(t.artist),
+                                    color = Color.White.copy(alpha = 0.80f),
+                                    style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            FilledIconButton(
-                                { vm.play(album.first(), album, featured.album, true, false) },
-                                Modifier.size(64.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                colors =
-                                    IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = palette.primary,
-                                        contentColor = palette.onPrimary,
-                                    ),
+                        }
+                    }
+                }
+            } else if (albums.size >= 2) {
+                item { SectionTitle(strings[R.string.albums]) }
+                item("albums-carousel") {
+                    val state = rememberCarouselState { albums.size }
+                    HorizontalMultiBrowseCarousel(
+                        state = state,
+                        preferredItemWidth = 172.dp,
+                        itemSpacing = 10.dp,
+                        modifier = Modifier.fillMaxWidth().height(184.dp),
+                    ) { idx ->
+                        val rows = albums[idx]
+                        val first = rows.first()
+                        Box(
+                            Modifier.fillMaxSize()
+                                .maskClip(RoundedCornerShape(28.dp))
+                                .clickable {
+                                    onCollection("${first.album} • ${first.artist}", rows)
+                                }
+                        ) {
+                            Artwork(first.artwork, first.album, Modifier.fillMaxSize(), 0)
+                            Box(
+                                Modifier.fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.35f to Color.Transparent,
+                                            1f to Color.Black.copy(alpha = 0.78f),
+                                        )
+                                    )
+                            )
+                            Column(
+                                Modifier.align(Alignment.BottomStart).padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    strings[R.string.play_album],
-                                    Modifier.size(32.dp),
+                                Text(
+                                    strings.metadata(first.album),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    strings.metadata(first.artist),
+                                    color = Color.White.copy(alpha = 0.80f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
                     }
                 }
             }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                val favoriteCount = tracks.count { it.favorite }
-                QuickCollection(
-                    strings[R.string.favourites],
-                    strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
-                    Icons.Default.Favorite,
-                    Modifier.weight(1f),
-                ) {
-                    onCollection(strings[R.string.favourites], tracks.filter { it.favorite })
-                }
-                QuickCollection(
-                    strings[R.string.new_music],
-                    strings[R.string.in_your_library],
-                    Icons.Default.AddCircleOutline,
-                    Modifier.weight(1f),
-                ) {
-                    onCollection(
-                        strings[R.string.recently_added],
-                        tracks.sortedByDescending { it.addedAt },
-                    )
-                }
-            }
-        }
-        if (recent.isNotEmpty()) {
-            item { SectionTitle(strings[R.string.recently_played]) }
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(recent, key = { it.id }) { t ->
-                        Column(
-                            Modifier.width(140.dp).clickable {
-                                vm.play(t, recent, strings[R.string.recently_played])
-                            }
-                        ) {
-                            Artwork(t.artwork, t.title, Modifier.size(140.dp), 20)
-                            Text(
-                                strings.metadata(t.title),
-                                Modifier.padding(top = 8.dp),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                strings.metadata(t.artist),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+            if (frequent.isNotEmpty()) {
+                val topTracks = frequent.take(3)
+                item { SectionTitle(strings[R.string.on_your_wavelength]) }
+                item("top-wavelength-group") {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        topTracks.forEachIndexed { idx, t ->
+                            TrackRow(
+                                t,
+                                t.id == current,
+                                { vm.play(t, frequent, strings[R.string.frequently_played]) },
+                                { vm.favorite(t) },
+                                { onAdd(t) },
+                                shape = segmentedItemShape(idx, topTracks.size),
                             )
                         }
                     }
                 }
             }
-        }
-        if (frequent.isNotEmpty()) {
-            item { SectionTitle(strings[R.string.on_your_wavelength]) }
-            items(frequent.take(3), key = { "top${it.id}" }) { t ->
-                TrackRow(
-                    t,
-                    t.id == current,
-                    { vm.play(t, frequent, strings[R.string.frequently_played]) },
-                    { vm.favorite(t) },
-                    { onAdd(t) },
-                )
-            }
-        }
-        if (playlists.isNotEmpty()) {
-            item { SectionTitle(strings[R.string.your_collections]) }
-            item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(playlists.take(5), key = { it.id }) { p ->
-                        Column(Modifier.width(140.dp).clickable { onPlaylist(p.id) }) {
+            if (playlists.isNotEmpty()) {
+                val topPlaylists = playlists.take(8)
+                item { SectionTitle(strings[R.string.your_collections]) }
+                item("playlists-carousel") {
+                    val state = rememberCarouselState { topPlaylists.size }
+                    HorizontalMultiBrowseCarousel(
+                        state = state,
+                        preferredItemWidth = 172.dp,
+                        itemSpacing = 10.dp,
+                        modifier = Modifier.fillMaxWidth().height(176.dp),
+                    ) { idx ->
+                        val p = topPlaylists[idx]
+                        Box(
+                            Modifier.fillMaxSize()
+                                .maskClip(RoundedCornerShape(28.dp))
+                                .clickable { onPlaylist(p.id) }
+                        ) {
                             Artwork(
                                 p.cover ?: p.tracks.firstOrNull()?.let { byId[it]?.artwork },
                                 p.name,
-                                Modifier.size(140.dp),
-                                20,
+                                Modifier.fillMaxSize(),
+                                0,
                             )
-                            Text(
-                                p.name,
-                                Modifier.padding(top = 8.dp),
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                            Box(
+                                Modifier.fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.35f to Color.Transparent,
+                                            1f to Color.Black.copy(alpha = 0.78f),
+                                        )
+                                    )
                             )
+                            Column(
+                                Modifier.align(Alignment.BottomStart).padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    p.name,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    strings.plural(R.plurals.tracks, p.tracks.size, p.tracks.size),
+                                    color = Color.White.copy(alpha = 0.80f),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -282,27 +431,41 @@ private fun QuickCollection(
     title: String,
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    badgeShape: Shape,
+    badgeColor: Color,
+    badgeContentColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
         modifier = modifier,
-        shape = LadShapes.card,
+        shape = LadShapes.artwork,
         colors =
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Column(
             Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Surface(
+                shape = badgeShape,
+                color = badgeColor,
+                contentColor = badgeContentColor,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(22.dp))
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -321,157 +484,176 @@ fun LibraryScreen(
 ) {
     val strings = rememberText()
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-            ChoiceChips(
-                tab.toString(),
-                listOf(
-                    "0" to strings[R.string.library_screens_tracks],
-                    "1" to strings[R.string.albums],
-                    "2" to strings[R.string.artists],
-                ),
-            ) {
-                tab = it.toInt()
+    val pullState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = scanning,
+        onRefresh = { vm.refresh(false) },
+        state = pullState,
+        indicator = {
+            PullToRefreshDefaults.LoadingIndicator(
+                state = pullState,
+                isRefreshing = scanning,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                ChoiceChips(
+                    tab.toString(),
+                    listOf(
+                        "0" to strings[R.string.library_screens_tracks],
+                        "1" to strings[R.string.albums],
+                        "2" to strings[R.string.artists],
+                    ),
+                ) {
+                    tab = it.toInt()
+                }
             }
-        }
-        if (!permitted)
-            EmptyState(
-                strings[R.string.allow_access],
-                strings[R.string.access_to_audio_files_is_needed],
-                strings[R.string.allow],
-                onPermission,
-            )
-        else if (tracks.isEmpty())
-            EmptyState(
-                if (scanning) strings[R.string.finding_music] else strings[R.string.no_music_found],
-                strings[R.string.add_files_to_the_music_folder],
-                if (scanning) null else strings[R.string.refresh],
-                vm::refresh,
-            )
-        else if (tab == 0)
-            TrackListScreen(
-                strings[R.string.all_tracks],
-                tracks,
-                current,
-                vm,
-                onAdd,
-                header = {
-                    Card(
-                        onClick = {
-                            onCollection(
-                                strings[R.string.favourites],
-                                tracks.filter { it.favorite },
-                            )
-                        },
-                        shape = LadShapes.card,
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                            ),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            if (!permitted)
+                EmptyState(
+                    strings[R.string.allow_access],
+                    strings[R.string.access_to_audio_files_is_needed],
+                    strings[R.string.allow],
+                    onPermission,
+                )
+            else if (tracks.isEmpty())
+                EmptyState(
+                    if (scanning) strings[R.string.finding_music]
+                    else strings[R.string.no_music_found],
+                    strings[R.string.add_files_to_the_music_folder],
+                    if (scanning) null else strings[R.string.refresh],
+                    vm::refresh,
+                )
+            else if (tab == 0)
+                TrackListScreen(
+                    strings[R.string.all_tracks],
+                    tracks,
+                    current,
+                    vm,
+                    onAdd,
+                    header = {
+                        Card(
+                            onClick = {
+                                onCollection(
+                                    strings[R.string.favourites],
+                                    tracks.filter { it.favorite },
+                                )
+                            },
+                            shape = LadShapes.artwork,
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                ),
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
+                            Row(
+                                Modifier.fillMaxWidth().padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
-                                Box(Modifier.size(60.dp), contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Favorite,
-                                        null,
-                                        Modifier.size(28.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
+                                Surface(
+                                    shape = FlowerShape,
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                ) {
+                                    Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Favorite, null, Modifier.size(26.dp))
+                                    }
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        strings[R.string.favourite_tracks],
+                                        style = MaterialTheme.typography.titleLarge,
+                                    )
+                                    val favoriteCount = tracks.count { it.favorite }
+                                    Text(
+                                        strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
+                                Icon(Icons.Default.ChevronRight, null)
                             }
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    strings[R.string.favourite_tracks],
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
-                                val favoriteCount = tracks.count { it.favorite }
-                                Text(
-                                    strings.plural(R.plurals.tracks, favoriteCount, favoriteCount),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Icon(Icons.Default.ChevronRight, null)
                         }
+                    },
+                )
+            else {
+                val mergeArtists = LocalLadSettings.current.mergeArtists
+                val groups =
+                    remember(tracks, tab, mergeArtists) {
+                        if (tab == 1)
+                            groupAlbums(tracks).map { rows ->
+                                ArtistCredits.Group(
+                                    rows.first().albumKey(),
+                                    rows.first().album,
+                                    rows,
+                                )
+                            }
+                        else
+                            ArtistCredits(tracks.map { it.artist }, mergeArtists).groups(tracks) {
+                                it.artist
+                            }
                     }
-                },
-            )
-        else {
-            val mergeArtists = LocalLadSettings.current.mergeArtists
-            val groups =
-                remember(tracks, tab, mergeArtists) {
-                    if (tab == 1)
-                        groupAlbums(tracks).map { rows ->
-                            ArtistCredits.Group(rows.first().albumKey(), rows.first().album, rows)
-                        }
-                    else
-                        ArtistCredits(tracks.map { it.artist }, mergeArtists).groups(tracks) {
-                            it.artist
-                        }
-                }
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(groups, key = { it.key }) { group ->
-                    val list = group.items
-                    val first = list.first()
-                    val name = group.name
-                    val artist =
-                        list.map { it.artist }.distinct().singleOrNull()
-                            ?: strings[R.string.various_artists]
-                    Card(
-                        onClick = {
-                            if (tab == 1) onCollection("$name • $artist", list)
-                            else onArtist(name, list)
-                        },
-                        shape = LadShapes.card,
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                            ),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    itemsIndexed(groups, key = { _, g -> g.key }) { idx, group ->
+                        val list = group.items
+                        val first = list.first()
+                        val name = group.name
+                        val artist =
+                            if (tab == 1)
+                                list.map { it.artist }.distinct().singleOrNull()
+                                    ?: strings[R.string.various_artists]
+                            else name
+                        Surface(
+                            onClick = {
+                                if (tab == 1) onCollection("$name • $artist", list)
+                                else onArtist(name, list)
+                            },
+                            shape = segmentedItemShape(idx, groups.size),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
                         ) {
-                            if (tab == 1) Artwork(first.artwork, name, Modifier.size(76.dp), 12)
-                            else ArtistPortrait(name, list, Modifier.size(76.dp), round = 12)
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    if (tab == 1) artist else strings[R.string.artist],
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    strings.plural(R.plurals.tracks, list.size, list.size),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                            FilledTonalIconButton(
-                                { vm.play(first, list, name, true, false) },
-                                Modifier.size(48.dp),
+                            Row(
+                                Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
-                                Icon(Icons.Default.PlayArrow, strings.format(R.string.play, name))
+                                if (tab == 1) Artwork(first.artwork, name, Modifier.size(64.dp), 12)
+                                else ArtistPortrait(name, list, Modifier.size(64.dp), round = 12)
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        if (tab == 1) artist else strings[R.string.artist],
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        strings.plural(R.plurals.tracks, list.size, list.size),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                                FilledTonalIconButton(
+                                    { vm.play(first, list, name, true, false) },
+                                    Modifier.size(48.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        strings.format(R.string.play, name),
+                                    )
+                                }
                             }
                         }
                     }
@@ -532,9 +714,13 @@ fun TrackListScreen(
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        header?.let { item { it() } }
+        header?.let {
+            item {
+                Box(Modifier.padding(bottom = 8.dp)) { it() }
+            }
+        }
         if (showCover)
             item {
                 val first = sorted.first()
@@ -544,6 +730,7 @@ fun TrackListScreen(
                         ?: MaterialTheme.colorScheme
                 Column(
                     Modifier.fillMaxWidth()
+                        .padding(bottom = 10.dp)
                         .clip(LadShapes.hero)
                         .background(
                             Brush.verticalGradient(listOf(colors.primaryContainer, colors.surface))
@@ -564,7 +751,7 @@ fun TrackListScreen(
                             first.artwork,
                             name,
                             Modifier.fillMaxWidth(0.74f).aspectRatio(1f),
-                            22,
+                            20,
                         )
                     Spacer(Modifier.height(20.dp))
                     Text(
@@ -599,8 +786,9 @@ fun TrackListScreen(
         if (onAlbum != null) item { ArtistAlbums(albumTracks, onAlbum) }
         item {
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     strings.plural(R.plurals.tracks, sorted.size, sorted.size),
@@ -609,7 +797,7 @@ fun TrackListScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Box {
-                    IconButton({ menu = true }) {
+                    FilledTonalIconButton({ menu = true }, Modifier.size(44.dp)) {
                         Icon(Icons.AutoMirrored.Filled.Sort, strings[R.string.sort])
                     }
                     if (menu)
@@ -641,26 +829,42 @@ fun TrackListScreen(
                                 },
                         )
                 }
-                IconButton({ vm.play(sorted.random(), sorted, name, true, true) }) {
-                    Icon(Icons.Default.Shuffle, strings[R.string.library_screens_shuffle])
-                }
-                FilledTonalButton(
-                    { vm.play(sorted.first(), sorted, name, true, false) },
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
-                ) {
-                    Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
-                    Text(strings[R.string.library_screens_play])
-                }
+                // Official M3 Expressive Split Button: Play (leading) | Shuffle (trailing)
+                SplitButtonLayout(
+                    leadingButton = {
+                        SplitButtonDefaults.LeadingButton(
+                            onClick = { vm.play(sorted.first(), sorted, name, true, false) },
+                        ) {
+                            Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(strings[R.string.library_screens_play])
+                        }
+                    },
+                    trailingButton = {
+                        SplitButtonDefaults.TrailingButton(
+                            checked = false,
+                            onCheckedChange = {
+                                vm.play(sorted.random(), sorted, name, true, true)
+                            },
+                        ) {
+                            Icon(
+                                Icons.Default.Shuffle,
+                                strings[R.string.library_screens_shuffle],
+                                Modifier.size(20.dp),
+                            )
+                        }
+                    },
+                )
             }
         }
-        items(sorted, key = { it.id }) { t ->
+        itemsIndexed(sorted, key = { _, t -> t.id }) { idx, t ->
             TrackRow(
                 t,
                 t.id == current,
                 { vm.play(t, sorted, name) },
                 { vm.favorite(t) },
                 { onAdd(t) },
+                shape = segmentedItemShape(idx, sorted.size),
             )
         }
     }
@@ -680,6 +884,7 @@ fun SearchScreen(
     val strings = rememberText()
     val mergeArtists = LocalLadSettings.current.mergeArtists
     var query by rememberSaveable { mutableStateOf("") }
+    var filter by rememberSaveable { mutableStateOf("all") }
     val found =
         remember(query, tracks) {
             if (query.isBlank()) emptyList()
@@ -701,7 +906,7 @@ fun SearchScreen(
                 ArtistCredits(tracks.map { it.artist }, mergeArtists)
                     .groups(tracks) { it.artist }
                     .filter { it.name.contains(query, true) }
-                    .take(4)
+                    .take(5)
         }
     val foundAlbums =
         remember(query, found) {
@@ -711,20 +916,88 @@ fun SearchScreen(
                     .groupBy { "${it.album} • ${it.artist}" }
                     .filterKeys { it.contains(query, true) }
                     .entries
-                    .take(4)
+                    .take(5)
                     .toList()
         }
-    Column(Modifier.padding(horizontal = 16.dp)) {
-        OutlinedTextField(
-            query,
-            { query = it },
-            placeholder = { Text(strings[R.string.track_album_artist]) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(28.dp),
-            leadingIcon = { Icon(Icons.Default.Search, null) },
+    val filters =
+        listOf(
+            "all" to strings[R.string.search_filter_all],
+            "tracks" to strings[R.string.library_screens_tracks],
+            "albums" to strings[R.string.albums],
+            "artists" to strings[R.string.artists],
+            "playlists" to strings[R.string.playlists],
         )
-        LazyColumn(contentPadding = PaddingValues(vertical = 12.dp)) {
+    Column(Modifier.fillMaxSize()) {
+        // M3 Expressive Filled Pill Search Container
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(56.dp),
+        ) {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    Icons.Default.Search,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) {
+                        Text(
+                            strings[R.string.track_album_artist],
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle =
+                            MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Close, strings[R.string.clear], Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            filters.forEach { (id, label) ->
+                val selected = filter == id
+                FilterChip(
+                    selected = selected,
+                    onClick = { filter = id },
+                    label = { Text(label) },
+                    leadingIcon =
+                        if (selected) {
+                            { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                        } else null,
+                )
+            }
+        }
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             if (query.isBlank())
                 item {
                     EmptyState(
@@ -733,56 +1006,106 @@ fun SearchScreen(
                     )
                 }
             else {
-                items(foundPlaylists, key = { "p${it.id}" }) { p ->
-                    ListItem(
-                        headlineContent = { Text(p.name) },
-                        supportingContent = {
-                            Text(
-                                strings.plural(
-                                    R.plurals.playlist_tracks,
-                                    p.tracks.size,
-                                    p.tracks.size,
+                val showPlaylists = filter in setOf("all", "playlists") && foundPlaylists.isNotEmpty()
+                val showArtists = filter in setOf("all", "artists") && foundArtists.isNotEmpty()
+                val showAlbums = filter in setOf("all", "albums") && foundAlbums.isNotEmpty()
+                val showTracks = filter in setOf("all", "tracks") && found.isNotEmpty()
+
+                if (showPlaylists) {
+                    item { SectionTitle(strings[R.string.playlists]) }
+                    itemsIndexed(foundPlaylists, key = { _, p -> "p${p.id}" }) { idx, p ->
+                        Surface(
+                            onClick = { onPlaylist(p.id) },
+                            shape = segmentedItemShape(idx, foundPlaylists.size),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            ListItem(
+                                headlineContent = { Text(p.name, fontWeight = FontWeight.SemiBold) },
+                                supportingContent = {
+                                    Text(
+                                        strings.plural(
+                                            R.plurals.playlist_tracks,
+                                            p.tracks.size,
+                                            p.tracks.size,
+                                        )
+                                    )
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.QueueMusic,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
+                    }
+                }
+                if (showArtists) {
+                    item { SectionTitle(strings[R.string.artists]) }
+                    itemsIndexed(foundArtists, key = { _, g -> "a${g.key}" }) { idx, group ->
+                        val a = group.name
+                        Surface(
+                            onClick = { onArtist(a, group.items) },
+                            shape = segmentedItemShape(idx, foundArtists.size),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            ListItem(
+                                headlineContent = { Text(a, fontWeight = FontWeight.SemiBold) },
+                                supportingContent = { Text(strings[R.string.artist]) },
+                                leadingContent = {
+                                    ArtistPortrait(a, group.items, Modifier.size(48.dp), round = 12)
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
+                    }
+                }
+                if (showAlbums) {
+                    item { SectionTitle(strings[R.string.albums]) }
+                    itemsIndexed(foundAlbums, key = { _, e -> "album${e.key}" }) { idx, (a, list) ->
+                        Surface(
+                            onClick = { onCollection(a, list) },
+                            shape = segmentedItemShape(idx, foundAlbums.size),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ) {
+                            ListItem(
+                                headlineContent = { Text(a, fontWeight = FontWeight.SemiBold) },
+                                supportingContent = { Text(strings[R.string.album]) },
+                                leadingContent = {
+                                    Artwork(
+                                        list.firstOrNull()?.artwork,
+                                        a,
+                                        Modifier.size(48.dp),
+                                        12,
+                                    )
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
+                    }
+                }
+                if (showTracks) {
+                    item { SectionTitle(strings[R.string.library_screens_tracks]) }
+                    itemsIndexed(found, key = { _, t -> t.id }) { idx, t ->
+                        TrackRow(
+                            t,
+                            t.id == current,
+                            {
+                                vm.play(
+                                    t,
+                                    found,
+                                    strings.format(R.string.library_screens_search, query),
                                 )
-                            )
-                        },
-                        modifier = Modifier.clickable { onPlaylist(p.id) },
-                    )
+                            },
+                            { vm.favorite(t) },
+                            { onAdd(t) },
+                            shape = segmentedItemShape(idx, found.size),
+                        )
+                    }
                 }
-                items(foundArtists, key = { "a${it.key}" }) { group ->
-                    val a = group.name
-                    ListItem(
-                        headlineContent = { Text(a) },
-                        supportingContent = { Text(strings[R.string.artist]) },
-                        leadingContent = {
-                            ArtistPortrait(a, group.items, Modifier.size(48.dp), round = 12)
-                        },
-                        modifier = Modifier.clickable { onArtist(a, group.items) },
-                    )
-                }
-                items(foundAlbums, key = { "album${it.key}" }) { (a, list) ->
-                    ListItem(
-                        headlineContent = { Text(a) },
-                        supportingContent = { Text(strings[R.string.album]) },
-                        leadingContent = { Icon(Icons.Default.Album, null) },
-                        modifier = Modifier.clickable { onCollection(a, list) },
-                    )
-                }
-                items(found, key = { it.id }) { t ->
-                    TrackRow(
-                        t,
-                        t.id == current,
-                        {
-                            vm.play(
-                                t,
-                                found,
-                                strings.format(R.string.library_screens_search, query),
-                            )
-                        },
-                        { vm.favorite(t) },
-                        { onAdd(t) },
-                    )
-                }
-                if (found.isEmpty() && foundPlaylists.isEmpty())
+                if (!showPlaylists && !showArtists && !showAlbums && !showTracks)
                     item {
                         EmptyState(
                             strings[R.string.no_results],

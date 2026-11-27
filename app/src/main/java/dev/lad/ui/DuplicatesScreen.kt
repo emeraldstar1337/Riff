@@ -63,7 +63,7 @@ fun DuplicatesScreen(tracks: List<Track>, vm: LadViewModel) {
                 )
             }
         }
-        if (busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (busy) item { LinearWavyProgressIndicator(Modifier.fillMaxWidth()) }
         error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
         if (done && groups.isEmpty()) item { Text(strings[R.string.no_identical_files_found]) }
         groups.forEachIndexed { i, group ->

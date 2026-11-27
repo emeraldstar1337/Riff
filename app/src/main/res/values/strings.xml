@@ -586,4 +586,8 @@
     <string name="pause_cover_shape_title">Shape when paused</string>
     <string name="pause_cover_shape_subtitle">The artwork smoothly morphs between pause and playback shapes</string>
     <string name="morph_preview_tap_hint">Tap to test play / pause morph</string>
+    <string name="nav_style_title">Navigation bar style</string>
+    <string name="nav_style_bar">Full-width bar</string>
+    <string name="nav_style_dock">Floating dock</string>
+    <string name="search_filter_all">All</string>
 </resources>

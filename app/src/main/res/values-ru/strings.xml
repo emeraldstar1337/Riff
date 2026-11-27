@@ -586,4 +586,8 @@
     <string name="pause_cover_shape_title">Форма на паузе</string>
     <string name="pause_cover_shape_subtitle">Обложка плавно перетекает между формой паузы и формой воспроизведения</string>
     <string name="morph_preview_tap_hint">Нажми, чтобы проверить переход Play / Pause</string>
+    <string name="nav_style_title">Стиль панели навигации</string>
+    <string name="nav_style_bar">Панель M3E</string>
+    <string name="nav_style_dock">Плавающий док</string>
+    <string name="search_filter_all">Всё</string>
 </resources>

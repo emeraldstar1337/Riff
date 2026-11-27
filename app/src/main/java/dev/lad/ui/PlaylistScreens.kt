@@ -12,7 +12,6 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -53,7 +52,7 @@ fun NameDialog(
             TextButton(
                 onClick = { onSave(name.trim()) },
                 enabled = name.isNotBlank(),
-                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                shapes = ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.save])
             }
@@ -61,7 +60,7 @@ fun NameDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
-                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                shapes = ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.cancel])
             }
@@ -105,7 +104,7 @@ fun AddPlaylistDialog(
             confirmButton = {
                 TextButton(
                     onClick = { creating = true },
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.create_playlist])
                 }
@@ -113,7 +112,7 @@ fun AddPlaylistDialog(
             dismissButton = {
                 TextButton(
                     onClick = onDismiss,
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.close])
                 }
@@ -131,55 +130,65 @@ fun PlaylistsScreen(
     val strings = rememberText()
     var create by remember { mutableStateOf(false) }
     val lookup = remember(tracks) { tracks.associateBy { it.id } }
-    LazyColumn(
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            FilledTonalButton(
-                onClick = { create = true },
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(18.dp),
-                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
-            ) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text(strings[R.string.new_playlist])
-            }
-        }
-        if (playlists.isEmpty())
-            item {
-                EmptyState(
-                    strings[R.string.set_the_mood],
-                    strings[R.string.create_a_playlist_then_add_tracks],
-                )
-            }
-        items(playlists, key = { it.id }) { p ->
-            Card(onClick = { onOpen(p.id) }, shape = RoundedCornerShape(28.dp)) {
-                Row(
-                    Modifier.fillMaxWidth().padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Artwork(
-                        p.cover ?: p.tracks.firstOrNull()?.let { lookup[it]?.artwork },
-                        p.name,
-                        Modifier.size(80.dp),
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 92.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            if (playlists.isEmpty())
+                item {
+                    EmptyState(
+                        strings[R.string.set_the_mood],
+                        strings[R.string.create_a_playlist_then_add_tracks],
                     )
-                    Column {
-                        Text(
+                }
+            itemsIndexed(playlists, key = { _, p -> p.id }) { idx, p ->
+                Surface(
+                    onClick = { onOpen(p.id) },
+                    shape = segmentedItemShape(idx, playlists.size),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Artwork(
+                            p.cover ?: p.tracks.firstOrNull()?.let { lookup[it]?.artwork },
                             p.name,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
+                            Modifier.size(72.dp),
+                            14,
                         )
-                        Text(
-                            strings.plural(R.plurals.tracks, p.tracks.size, p.tracks.size),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                p.name,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                strings.plural(R.plurals.tracks, p.tracks.size, p.tracks.size),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
         }
+        // Official M3 Expressive Extended FAB anchored bottom-end above MiniPlayer & NavigationBar
+        ExtendedFloatingActionButton(
+            onClick = { create = true },
+            icon = { Icon(Icons.Default.Add, null) },
+            text = { Text(strings[R.string.new_playlist], fontWeight = FontWeight.SemiBold) },
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        )
     }
     if (create)
         NameDialog(
@@ -226,10 +235,14 @@ fun PlaylistScreen(
                 vm.savePlaylist(p.copy(cover = uri.toString()))
             }
         }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
         item {
             Column(
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -237,7 +250,7 @@ fun PlaylistScreen(
                     p.cover ?: available.firstOrNull()?.artwork,
                     p.name,
                     Modifier.size(190.dp).clickable { cover.launch(arrayOf("image/*")) },
-                    38,
+                    28,
                 )
                 Text(
                     p.name,
@@ -253,33 +266,47 @@ fun PlaylistScreen(
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(
-                        onClick = {
-                            available.firstOrNull()?.let {
-                                vm.play(it, available, p.name, true, false)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SplitButtonLayout(
+                        leadingButton = {
+                            SplitButtonDefaults.LeadingButton(
+                                onClick = {
+                                    available.firstOrNull()?.let {
+                                        vm.play(it, available, p.name, true, false)
+                                    }
+                                },
+                                enabled = available.isNotEmpty(),
+                            ) {
+                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(strings[R.string.listen])
                             }
                         },
-                        enabled = available.isNotEmpty(),
-                        shapes = androidx.compose.material3.ButtonDefaults.shapes(),
-                    ) {
-                        Icon(Icons.Default.PlayArrow, null)
-                        Text(strings[R.string.listen])
-                    }
-                    IconButton(
-                        onClick = {
-                            available.randomOrNull()?.let {
-                                vm.play(it, available, p.name, true, true)
+                        trailingButton = {
+                            SplitButtonDefaults.TrailingButton(
+                                checked = false,
+                                onCheckedChange = {
+                                    available.randomOrNull()?.let {
+                                        vm.play(it, available, p.name, true, true)
+                                    }
+                                },
+                                enabled = available.isNotEmpty(),
+                            ) {
+                                Icon(
+                                    Icons.Default.Shuffle,
+                                    strings[R.string.library_screens_shuffle],
+                                    Modifier.size(20.dp),
+                                )
                             }
                         },
-                        enabled = available.isNotEmpty(),
-                    ) {
-                        Icon(Icons.Default.Shuffle, strings[R.string.library_screens_shuffle])
-                    }
-                    IconButton(onClick = { rename = true }) {
+                    )
+                    FilledTonalIconButton(onClick = { rename = true }) {
                         Icon(Icons.Default.Edit, strings[R.string.rename])
                     }
-                    IconButton(onClick = { delete = true }) {
+                    FilledTonalIconButton(onClick = { delete = true }) {
                         Icon(Icons.Default.Delete, strings[R.string.delete_playlist])
                     }
                 }
@@ -320,7 +347,7 @@ fun PlaylistScreen(
                     strings[R.string.tap_add_tracks_to_choose_songs],
                 )
             }
-        items(available, key = { it.id }) { t ->
+        itemsIndexed(available, key = { _, t -> t.id }) { idx, t ->
             TrackRow(
                 t,
                 t.id == current,
@@ -328,6 +355,7 @@ fun PlaylistScreen(
                 { vm.favorite(t) },
                 { onAdd(t) },
                 modifier = Modifier.animateItem(),
+                shape = segmentedItemShape(idx, available.size),
                 trailing = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
@@ -416,7 +444,7 @@ fun PlaylistScreen(
                         delete = false
                         onDeleted()
                     },
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.delete])
                 }
@@ -424,7 +452,7 @@ fun PlaylistScreen(
             dismissButton = {
                 TextButton(
                     onClick = { delete = false },
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                    shapes = ButtonDefaults.shapes(),
                 ) {
                     Text(strings[R.string.cancel])
                 }
@@ -500,7 +528,7 @@ fun PickTracksDialog(
             TextButton(
                 onClick = { onSave(selected.toList()) },
                 enabled = selected.isNotEmpty(),
-                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                shapes = ButtonDefaults.shapes(),
             ) {
                 Text(strings.format(R.string.playlist_screens_add, selected.size))
             }
@@ -508,7 +536,7 @@ fun PickTracksDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
-                shapes = androidx.compose.material3.ButtonDefaults.shapes(),
+                shapes = ButtonDefaults.shapes(),
             ) {
                 Text(strings[R.string.cancel])
             }

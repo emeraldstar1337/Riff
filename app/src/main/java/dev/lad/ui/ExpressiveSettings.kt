@@ -136,6 +136,13 @@ fun ChoiceChips(
                     checked = checked,
                     contentPadding = PaddingValues(horizontal = horizontalPad, vertical = 10.dp),
                     onCheckedChange = { onSelect(value) },
+                    colors =
+                        ToggleButtonDefaults.toggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ),
                     modifier =
                         Modifier.weight(itemWeight)
                             .defaultMinSize(minWidth = 1.dp, minHeight = 48.dp)
